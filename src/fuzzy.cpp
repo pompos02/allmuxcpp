@@ -7,7 +7,7 @@ namespace allmux {
 
 FuzzyMatch fuzzy_match(const std::string& text, const std::string& query) {
     if (query.empty()) {
-        return {.matched = true, .score = 0, .indices = {}};
+        return {.matched = true, .score = 0};
     }
 
     auto lower_text = text;
@@ -20,7 +20,6 @@ FuzzyMatch fuzzy_match(const std::string& text, const std::string& query) {
     std::size_t pos = 0;
     int score = 0;
     int streak = 0;
-    std::vector<std::size_t> indices;
 
     for (const char wanted : lower_query) {
         const auto found = lower_text.find(wanted, pos);
@@ -29,11 +28,10 @@ FuzzyMatch fuzzy_match(const std::string& text, const std::string& query) {
         }
         streak = found == pos ? streak + 1 : 1;
         score += 10 + streak * 4 - static_cast<int>(found - pos);
-        indices.push_back(found);
         pos = found + 1;
     }
 
-    return {.matched = true, .score = score, .indices = std::move(indices)};
+    return {.matched = true, .score = score};
 }
 
 } // namespace allmux

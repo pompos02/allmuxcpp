@@ -170,7 +170,7 @@ std::vector<Match> App::filtered_matches() const {
         line.push_back(text("  "));
         line.push_back(text(*app.status) | color(app.status_color) | bold);
     }
-    return hbox(std::move(line)) | border;
+    return hbox(std::move(line));
 }
 
 [[nodiscard]] std::string value_or_dash(const std::string& value) {
@@ -318,7 +318,8 @@ std::optional<UiAction> run_ui(AppData data) {
                               color(Color::GrayDark));
         }
 
-        auto left = vbox({search_box(app), vbox(std::move(visible)) | yframe | flex}) |
+        auto left = vbox({search_box(app), separator(),
+                          vbox(std::move(visible)) | yframe | flex}) |
                     border;
 
         if (!app.preview_expanded) {

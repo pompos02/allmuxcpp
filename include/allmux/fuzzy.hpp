@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstddef>
 #include <string>
 
 namespace allmux {
@@ -10,7 +9,7 @@ struct FuzzyMatch {
     int score = 0;
 };
 
-[[nodiscard]] FuzzyMatch fuzzy_match(const std::string& text,
-                                     const std::string& query);
+[[nodiscard]]
+FuzzyMatch fuzzy_match(const std::string& text, const std::string& query);
 
 } // namespace allmux

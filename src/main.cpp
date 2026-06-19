@@ -5,6 +5,7 @@
 #include <exception>
 #include <iostream>
 
+// Main function
 int main() {
     try {
         auto data = allmux::load_app_data();

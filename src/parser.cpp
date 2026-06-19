@@ -18,8 +18,8 @@ namespace allmux {
 namespace fs = std::filesystem;
 
 static void
-push_tmux_dir(std::vector<std::pair<std::string, std::string>> &dirs,
-               std::set<fs::path> &seen, const fs::path &path) {
+push_tmux_dir(std::vector<std::pair<std::string, std::string>>& dirs,
+              std::set<fs::path>& seen, const fs::path& path) {
     const auto canonical = fs::canonical(path);
     if (seen.insert(canonical).second) {
         dirs.emplace_back(canonical.string(), canonical.filename().string());
@@ -48,7 +48,7 @@ static std::vector<std::pair<std::string, std::string>> tmux_dirs() {
         }
 
         push_tmux_dir(dirs, seen, full_path);
-        for (const auto &child : fs::directory_iterator(full_path, ec)) {
+        for (const auto& child : fs::directory_iterator(full_path, ec)) {
             if (ec) {
                 break;
             }
@@ -61,7 +61,7 @@ static std::vector<std::pair<std::string, std::string>> tmux_dirs() {
     return dirs;
 }
 
-static std::string format_permissions(const fs::path &path) {
+static std::string format_permissions(const fs::path& path) {
     struct stat st{};
     if (lstat(path.c_str(), &st) != 0) {
         return "----------";
@@ -105,10 +105,10 @@ static std::string human_size(std::uintmax_t bytes) {
     return out.str();
 }
 
-static std::optional<std::string> tmux_ls_preview(const std::string &path) {
+static std::optional<std::string> tmux_ls_preview(const std::string& path) {
     std::vector<std::string> rows;
     std::error_code ec;
-    for (const auto &entry : fs::directory_iterator(path, ec)) {
+    for (const auto& entry : fs::directory_iterator(path, ec)) {
         if (ec) {
             return std::nullopt;
         }
@@ -144,14 +144,14 @@ std::vector<TmuxSession> tmux_paths_and_sessions() {
     std::set<std::string> path_names;
     std::vector<TmuxSession> sessions;
 
-    for (const auto &[full_path, name] : dirs) {
+    for (const auto& [full_path, name] : dirs) {
         path_names.insert(name);
         sessions.push_back({.full_path = full_path,
                             .session_name = name,
                             .is_active = contains(active, name),
                             .preview = tmux_ls_preview(full_path)});
     }
-    for (const auto &name : active) {
+    for (const auto& name : active) {
         if (!path_names.contains(name)) {
             sessions.push_back({.full_path = std::nullopt,
                                 .session_name = name,
@@ -162,7 +162,7 @@ std::vector<TmuxSession> tmux_paths_and_sessions() {
     return sessions;
 }
 
-std::vector<SshHost> parse_ssh_config(const fs::path &path) {
+std::vector<SshHost> parse_ssh_config(const fs::path& path) {
     std::ifstream input(path);
     if (!input) {
         throw std::runtime_error("failed to read ssh config: " + path.string());
@@ -206,14 +206,14 @@ std::vector<SshHost> parse_ssh_config(const fs::path &path) {
     }
 
     const auto sessions = tmux_sessions();
-    for (auto &host : hosts) {
+    for (auto& host : hosts) {
         host.is_active_tmux = contains(sessions, host.alias);
     }
     return hosts;
 }
 
-static std::string column_field(const std::string &line,
-                                const std::vector<std::size_t> &starts,
+static std::string column_field(const std::string& line,
+                                const std::vector<std::size_t>& starts,
                                 std::size_t index) {
     if (index >= starts.size() || starts[index] >= line.size()) {
         return {};
@@ -225,7 +225,8 @@ static std::string column_field(const std::string &line,
 }
 
 std::vector<DockerContainer> parse_docker_containers() {
-    const auto result = run_command("docker ps -a");
+    std::string command[] = {"docker", "ps", "-a"};
+    const auto result = run_command(command);
     std::vector<DockerContainer> containers;
     if (result.exit_code != 0) {
         return containers;
@@ -241,7 +242,7 @@ std::vector<DockerContainer> parse_docker_containers() {
         "CONTAINER ID", "IMAGE", "COMMAND", "CREATED",
         "STATUS",       "PORTS", "NAMES"};
     std::vector<std::size_t> starts;
-    for (const auto &column : columns) {
+    for (const auto& column : columns) {
         if (const auto pos = header.find(column); pos != std::string::npos) {
             starts.push_back(pos);
         }
@@ -264,7 +265,7 @@ std::vector<DockerContainer> parse_docker_containers() {
     }
 
     const auto sessions = tmux_sessions();
-    for (auto &container : containers) {
+    for (auto& container : containers) {
         container.is_active_tmux = contains(sessions, container.name);
     }
     return containers;

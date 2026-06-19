@@ -9,7 +9,8 @@
 namespace allmux {
 
 std::vector<std::string> tmux_sessions() {
-    const auto result = run_command("tmux list-sessions -F '#{session_name}'");
+    std::string command[] = {"tmux", "list-sessions", "-F", "'#{session_name}'"};
+    const auto result = run_command(command);
     if (result.exit_code != 0) {
         throw std::runtime_error("failed to list tmux sessions: " +
                                  trim(result.output));
@@ -29,9 +30,18 @@ std::vector<std::string> tmux_sessions() {
 static std::string new_session_at(const std::string& name,
                                   const std::optional<std::string>& path) {
     const auto start_path = path.value_or(home_dir().string());
-    const auto command =
-        "tmux new-session -d -P -F '#{session_name}:#{window_index}.#{pane_index}' -s " +
-        shell_quote(name) + " -c " + shell_quote(start_path);
+    std::string command[] = {
+        "tmux",
+        "new-session",
+        "-d",
+        "-P",
+        "-F",
+        "'#{session_name}:#{window_index}.#{pane_index}'",
+        "-s",
+        shell_quote(name),
+        "-c",
+        shell_quote(start_path),
+    };
     const auto result = run_command(command);
     if (result.exit_code != 0) {
         throw std::runtime_error("tmux new-session failed: " +

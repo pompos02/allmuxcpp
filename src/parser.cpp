@@ -12,7 +12,9 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <sys/stat.h>
+#include <utility>
 
 namespace allmux {
 namespace fs = std::filesystem;
@@ -163,51 +165,64 @@ std::vector<TmuxSession> tmux_paths_and_sessions() {
 }
 
 std::vector<SshHost> parse_ssh_config(const fs::path& path) {
-    std::ifstream input(path);
+    std::ifstream input{path};
     if (!input) {
-        throw std::runtime_error("failed to read ssh config: " + path.string());
+        throw std::runtime_error(
+            std::format("failed to read ssh config: {}", path.string()));
     }
 
+    auto lowercase = [](std::string s) {
+        std::ranges::transform(s, s.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return s;
+    };
+
+    auto append_description = [](std::optional<std::string>& desc,
+                                 const std::string& text) {
+        desc.emplace(desc.value_or("") + std::string{trim(text)} + '\n');
+    };
+
     std::vector<SshHost> hosts;
-    std::optional<std::string> current_description;
+    std::optional<std::string> description;
+
     for (std::string raw; std::getline(input, raw);) {
         const auto line = trim(raw);
-        if (line.empty()) {
+
+        if (line.empty())
             continue;
-        }
-        if (line.starts_with("#")) {
-            current_description =
-                current_description.value_or("") + trim(line.substr(1)) + "\n";
-            continue;
+
+        if (line.starts_with('#')) {
+            append_description(description, line.substr(1));
         }
 
-        std::istringstream stream(line);
+        std::istringstream stream{std::string{line}};
         std::string key;
         stream >> key;
-        std::ranges::transform(key, key.begin(), [](unsigned char ch) {
-            return std::tolower(ch);
-        });
+        key = lowercase(std::move(key));
+
         if (key == "host") {
             std::string alias;
             stream >> alias;
-            if (!alias.empty() && alias != "*") {
-                hosts.push_back({.alias = alias,
-                                 .hostname = {},
-                                 .user = {},
-                                 .description = current_description,
-                                 .is_active_tmux = false});
-                current_description.reset();
+            if (alias == "*")
+                continue;
+
+            if (!alias.empty() && alias != "") {
+                hosts.emplace_back(alias, std::string{}, std::string{},
+                                   std::exchange(description, std::nullopt),
+                                   false);
             }
-        } else if (key == "hostname" && !hosts.empty()) {
+            continue;
+        }
+
+        if (hosts.empty())
+            continue;
+
+        if (key == "hostname") {
             stream >> hosts.back().hostname;
-        } else if (key == "user" && !hosts.empty()) {
+        } else if (key == "user") {
             stream >> hosts.back().user;
         }
-    }
-
-    const auto sessions = tmux_sessions();
-    for (auto& host : hosts) {
-        host.is_active_tmux = contains(sessions, host.alias);
     }
     return hosts;
 }
@@ -225,7 +240,7 @@ static std::string column_field(const std::string& line,
 }
 
 std::vector<DockerContainer> parse_docker_containers() {
-    std::string command[] = {"docker", "ps", "-a"};
+    const char* command[] = {"docker", "ps", "-a"};
     const auto result = run_command(command);
     std::vector<DockerContainer> containers;
     if (result.exit_code != 0) {

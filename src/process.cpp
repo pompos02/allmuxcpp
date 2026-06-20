@@ -13,7 +13,7 @@ extern char** environ;
 
 namespace allmux {
 
-CommandResult run_command(const std::span<std::string> args) {
+CommandResult run_command(std::span<const char* const> args) {
     CommandResult result;
 
     if (args.empty()) {
@@ -39,7 +39,7 @@ CommandResult run_command(const std::span<std::string> args) {
 
     std::vector<char*> argv;
     for (const auto& arg : args) {
-        argv.push_back(const_cast<char*>(arg.c_str()));
+        argv.push_back(const_cast<char*>(arg));
     }
 
     argv.push_back(nullptr);

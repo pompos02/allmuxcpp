@@ -23,6 +23,8 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(ftxui)
 FetchContent_MakeAvailable(rapidfuzz)
 
+find_package(Boost CONFIG REQUIRED)
+
 add_executable(${PROJECT_NAME})
 
 target_sources(allmuxcpp
@@ -40,6 +42,7 @@ target_include_directories(allmuxcpp PRIVATE include)
 
 target_link_libraries(allmuxcpp
   PRIVATE
+    Boost::headers
     ftxui::screen
     ftxui::dom
     ftxui::component

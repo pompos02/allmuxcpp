@@ -9,11 +9,11 @@
 namespace allmux {
 
 std::vector<std::string> tmux_sessions() {
-    const char* command[] = {"tmux", "list-sessions", "-F", "'#{session_name}'"};
+    const char* command[] = {"tmux", "list-sessions", "-F", "#{session_name}"};
     const auto result = run_command(command);
     if (result.exit_code != 0) {
-        throw std::runtime_error("failed to list tmux sessions: " +
-                                 trim(result.output));
+        throw std::runtime_error(std::format(
+            "failed to list tmux sessions:  {}", trim(result.output)));
     }
 
     std::vector<std::string> sessions;

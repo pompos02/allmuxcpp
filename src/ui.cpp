@@ -58,9 +58,9 @@ std::string docker_status_label(const DockerContainer& container) {
 
 [[nodiscard]] std::string tmux_display_text(const TmuxSession& session) {
     if (session.is_active) {
-        return session.session_name;
+        return session.basename;
     }
-    return session.full_path.value_or(session.session_name);
+    return session.full_path.value_or(session.basename);
 }
 
 [[nodiscard]] bool is_active_tmux(const Entry& entry) {
@@ -95,7 +95,7 @@ std::string docker_status_label(const DockerContainer& container) {
                 "docker", "doc"};
     }
     const auto& session = std::get<TmuxSession>(entry.data);
-    return {tmux_display_text(session), session.session_name,
+    return {tmux_display_text(session), session.basename,
             session.full_path.value_or(""), "tmux", "mux"};
 }
 
@@ -208,7 +208,7 @@ std::vector<Match> App::filtered_matches() const {
     }
     const auto& session = std::get<TmuxSession>(entry.data);
     return UiAction{.type = UiAction::Type::tmux,
-                    .name = session.session_name,
+                    .name = session.basename,
                     .path = session.full_path};
 }
 

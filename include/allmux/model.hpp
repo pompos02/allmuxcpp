@@ -29,7 +29,7 @@ struct DockerContainer {
 
 struct TmuxSession {
     std::optional<std::string> full_path;
-    std::string session_name;
+    std::string basename;
     bool is_active = false;
 };
 

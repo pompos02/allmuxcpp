@@ -13,32 +13,38 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <print>
 
 namespace allmux {
 namespace fs = std::filesystem;
 
-static void
-push_tmux_dir(std::vector<std::pair<std::string, std::string>>& dirs,
-              std::set<fs::path>& seen, const fs::path& path) {
-    const auto canonical = fs::canonical(path);
-    if (seen.insert(canonical).second) {
-        dirs.emplace_back(canonical.string(), canonical.filename().string());
+struct TmuxDir {
+    std::string full_path;
+    std::string base_name;
+};
+
+static bool is_tmux_session(std::string_view name, std::span<const std::string> active_sesssions) {
+    for (const auto& session : active_sesssions) {
+        if (name == session)
+            return true;
     }
+
+    return false;
 }
 
-static std::vector<std::pair<std::string, std::string>> tmux_dirs() {
+static std::vector<TmuxDir> tmux_dirs() {
     const fs::path file = config_dir() / ".allmux";
     std::ifstream input(file);
     if (!input) {
         throw std::runtime_error("could not read " + file.string());
     }
 
-    std::vector<std::pair<std::string, std::string>> dirs;
+    std::vector<TmuxDir> dirs;
     std::set<fs::path> seen;
     for (std::string line; std::getline(input, line);) {
         line = trim(line);
         if (line.empty()) {
-            continue;
+            line = ""; // this later becomes $HOME
         }
 
         const fs::path full_path = home_dir() / line;
@@ -47,43 +53,42 @@ static std::vector<std::pair<std::string, std::string>> tmux_dirs() {
             continue;
         }
 
-        push_tmux_dir(dirs, seen, full_path);
         for (const auto& child : fs::directory_iterator(full_path, ec)) {
             if (ec) {
-                break;
+                continue;
             }
             const auto name = child.path().filename().string();
-            if (!name.starts_with(".") && child.is_directory(ec)) {
-                push_tmux_dir(dirs, seen, child.path());
+            auto path = child.path();
+            if (!name.starts_with(".") && child.is_directory(ec) && !seen.contains(path)) {
+                dirs.emplace_back(
+                    TmuxDir{
+                        .full_path = child.path(),
+                        .base_name = name,
+                    }
+                );
+                seen.insert(path);
             }
         }
     }
     return dirs;
 }
 
-std::vector<TmuxSession> tmux_paths_and_sessions() {
+std::vector<TmuxSession> tmux_paths_and_sessions(std::span<std::string> active_sesssions) {
     const auto dirs = tmux_dirs();
-    const auto active = tmux_sessions();
     std::set<std::string> path_names;
     std::vector<TmuxSession> sessions;
 
     for (const auto& [full_path, name] : dirs) {
         path_names.insert(name);
+        bool is_active = is_tmux_session(name, active_sesssions);
         sessions.push_back({.full_path = full_path,
-                            .session_name = name,
-                            .is_active = contains(active, name)});
-    }
-    for (const auto& name : active) {
-        if (!path_names.contains(name)) {
-            sessions.push_back({.full_path = std::nullopt,
-                                .session_name = name,
-                                .is_active = true});
-        }
+                            .basename = name,
+                            .is_active = is_active});
     }
     return sessions;
 }
 
-std::vector<SshHost> parse_ssh_config(const fs::path& path) {
+std::vector<SshHost> ssh_hosts(const fs::path& path, std::span<std::string> active_sesssions) {
     std::ifstream input{path};
     if (!input) {
         throw std::runtime_error(
@@ -127,9 +132,10 @@ std::vector<SshHost> parse_ssh_config(const fs::path& path) {
                 continue;
 
             if (!alias.empty() && alias != "") {
+                bool is_active = is_tmux_session(alias, active_sesssions);
                 hosts.emplace_back(alias, std::string{}, std::string{},
                                    std::exchange(description, std::nullopt),
-                                   false);
+                                   is_active);
             }
             continue;
         }
@@ -146,7 +152,7 @@ std::vector<SshHost> parse_ssh_config(const fs::path& path) {
     return hosts;
 }
 
-std::vector<DockerContainer> docker_containers() {
+std::vector<DockerContainer> docker_containers(std::span<std::string> active_sesssions) {
     const char* command[] = {
         "docker", "ps", "-a",
         "--format", "{{.Names}}\t{{.Status}}"
@@ -170,15 +176,22 @@ std::vector<DockerContainer> docker_containers() {
 
         container.name = line.substr(0, separator);
         container.status = line.substr(separator + 1).contains("Up");
+        container.is_active = is_tmux_session(container.name, active_sesssions);
+
         containers.push_back(std::move(container));
     }
     return containers;
 }
 
 AppData load_app_data() {
-    return {.hosts = parse_ssh_config(home_dir() / ".ssh" / "config"),
-            .containers = docker_containers(),
-            .tmux_sessions = tmux_paths_and_sessions()};
+    auto active_sesssions = tmux_sessions();
+    for (auto tmp : active_sesssions) {
+        std::println("{}", tmp);
+    }
+
+    return {.hosts = ssh_hosts(home_dir() / ".ssh" / "config", active_sesssions),
+            .containers = docker_containers(active_sesssions),
+            .tmux_sessions = tmux_paths_and_sessions(active_sesssions)};
 }
 
 } // namespace allmux

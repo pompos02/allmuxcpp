@@ -8,7 +8,7 @@
 namespace allmux {
 
 [[nodiscard]]
-std::vector<SshHost> parse_ssh_config(const std::filesystem::path& path);
+std::vector<SshHost> ssh_hosts(const std::filesystem::path& path, const std::span<std::string> active_sessions);
 [[nodiscard]]
 std::vector<DockerContainer> parse_docker_containers();
 [[nodiscard]]

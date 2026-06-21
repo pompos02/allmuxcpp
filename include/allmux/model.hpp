@@ -24,14 +24,13 @@ struct DockerContainer {
     std::string status_text;
     std::string ports;
     bool status = false;
-    bool is_active_tmux = false;
+    bool is_active = false;
 };
 
 struct TmuxSession {
     std::optional<std::string> full_path;
     std::string session_name;
     bool is_active = false;
-    std::optional<std::string> preview;
 };
 
 using EntryData = std::variant<SshHost, DockerContainer, TmuxSession>;

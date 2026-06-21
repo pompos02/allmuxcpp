@@ -12,7 +12,6 @@
 #include <algorithm>
 #include <cctype>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -25,19 +24,36 @@ struct Match {
     int score = 0;
 };
 
+enum class DockerStatus {
+    Running,
+    Stopped,
+};
+
+constexpr std::string_view to_string_view(DockerStatus status) {
+    switch (status) {
+        case DockerStatus::Running: return "running";
+        case DockerStatus::Stopped: return "stopped";
+    }
+    return "unknown";
+}
+
 struct App {
     std::vector<Entry> entries;
     std::string query;
     std::size_t selected = 0;
-    bool preview_expanded = false;
-    std::optional<std::string> status;
+    bool loading = true;
+    std::optional<std::string> error;
+    std::optional<std::string> status; // Docker status running/stopped
     Color status_color = Color::Default;
 
-    [[nodiscard]] std::vector<Match> filtered_matches() const;
+    [[nodiscard]]
+    std::vector<Match> filtered_matches() const;
 };
 
-[[nodiscard]] std::string docker_status_label(const DockerContainer& container) {
-    return container.status ? "running" : "stopped";
+[[nodiscard]]
+std::string docker_status_label(const DockerContainer& container) {
+    auto label = container.status ? DockerStatus::Running : DockerStatus::Stopped;
+    return std::string(to_string_view(label));
 }
 
 [[nodiscard]] std::string tmux_display_text(const TmuxSession& session) {
@@ -52,7 +68,7 @@ struct App {
         return host->is_active_tmux;
     }
     if (const auto* container = std::get_if<DockerContainer>(&entry.data)) {
-        return container->is_active_tmux;
+        return container->is_active;
     }
     return std::get<TmuxSession>(entry.data).is_active;
 }
@@ -173,68 +189,6 @@ std::vector<Match> App::filtered_matches() const {
     return hbox(std::move(line));
 }
 
-[[nodiscard]] std::string value_or_dash(const std::string& value) {
-    return value.empty() ? "-" : value;
-}
-
-[[nodiscard]] Elements preview_lines(const Entry& entry) {
-    Elements lines;
-    auto field = [&](const std::string& label, const std::string& value,
-                     Color value_color = Color::Default) {
-        lines.push_back(hbox({text(label) | color(Color::Blue) | bold,
-                              text(" "), text(value) | color(value_color)}));
-    };
-
-    if (const auto* host = std::get_if<SshHost>(&entry.data)) {
-        lines.push_back(text("SSH Host") | color(Color::Cyan) | bold);
-        lines.push_back(separatorEmpty());
-        field("Host:", value_or_dash(host->alias));
-        field("User:", value_or_dash(host->user));
-        field("Hostname:", value_or_dash(host->hostname));
-        lines.push_back(separatorEmpty());
-        lines.push_back(text("Description:") | color(Color::Magenta) | bold);
-        std::istringstream desc(host->description.value_or("-"));
-        for (std::string line; std::getline(desc, line);) {
-            lines.push_back(text(line) | color(Color::Green));
-        }
-        return lines;
-    }
-
-    if (const auto* container = std::get_if<DockerContainer>(&entry.data)) {
-        lines.push_back(text("Docker Container") | color(Color::Magenta) | bold);
-        lines.push_back(separatorEmpty());
-        field("Name", container->name, Color::Yellow);
-        field("ID", container->id, Color::Cyan);
-        field("Image", container->image, Color::Green);
-        field("Command", value_or_dash(container->command));
-        lines.push_back(separatorEmpty());
-        field("Created", value_or_dash(container->created_at), Color::Blue);
-        field("Ports", value_or_dash(container->ports), Color::Magenta);
-        field("Status", docker_status_label(*container),
-              container->status ? Color::Green : Color::Red);
-        field("Details", value_or_dash(container->status_text));
-        return lines;
-    }
-
-    const auto& session = std::get<TmuxSession>(entry.data);
-    lines.push_back(text("Tmux Session") | color(Color::Cyan) | bold);
-    lines.push_back(separatorEmpty());
-    field("Name:", session.session_name, Color::Green);
-    field("Path:", session.full_path.value_or("-"));
-    lines.push_back(separatorEmpty());
-    lines.push_back(text("Files") | color(Color::Magenta) | bold);
-    if (session.preview && !trim(*session.preview).empty()) {
-        std::istringstream preview(*session.preview);
-        std::size_t count = 0;
-        for (std::string line; count < 30 && std::getline(preview, line); ++count) {
-            lines.push_back(text(line));
-        }
-    } else {
-        lines.push_back(text("No preview available."));
-    }
-    return lines;
-}
-
 [[nodiscard]] std::optional<UiAction> selected_action(const App& app) {
     const auto matches = app.filtered_matches();
     if (matches.empty() || app.selected >= matches.size()) {
@@ -318,23 +272,9 @@ std::optional<UiAction> run_ui(AppData data) {
                               color(Color::GrayDark));
         }
 
-        auto left = vbox({search_box(app), separator(),
-                          vbox(std::move(visible)) | yframe | flex}) |
-                    border;
-
-        if (!app.preview_expanded) {
-            return left;
-        }
-
-        Elements preview;
-        if (!matches.empty()) {
-            preview = preview_lines(app.entries[matches[app.selected].index]);
-        } else {
-            preview.push_back(text("No entries match the current search.") |
-                              color(Color::GrayDark));
-        }
-        return hbox({left | flex_grow,
-                     vbox(std::move(preview)) | border | flex_grow});
+        return vbox({search_box(app), separator(),
+                     vbox(std::move(visible)) | yframe | flex}) |
+               border;
     });
 
     auto component = CatchEvent(renderer, [&](Event event) {
@@ -388,11 +328,6 @@ std::optional<UiAction> run_ui(AppData data) {
         }
         if (event == Event::CtrlW) {
             delete_previous_word(app.query);
-            app.status.reset();
-            return true;
-        }
-        if (event == Event::CtrlS) {
-            app.preview_expanded = !app.preview_expanded;
             app.status.reset();
             return true;
         }

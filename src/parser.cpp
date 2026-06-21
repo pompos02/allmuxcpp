@@ -1,11 +1,10 @@
 #include "allmux/parser.hpp"
 
 #include "allmux/process.hpp"
-#include "allmux/tmux.hpp"
 #include "allmux/util.hpp"
+#include "allmux/tmux.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
@@ -13,7 +12,6 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <sys/stat.h>
 #include <utility>
 
 namespace allmux {
@@ -63,83 +61,6 @@ static std::vector<std::pair<std::string, std::string>> tmux_dirs() {
     return dirs;
 }
 
-static std::string format_permissions(const fs::path& path) {
-    struct stat st{};
-    if (lstat(path.c_str(), &st) != 0) {
-        return "----------";
-    }
-
-    std::string permissions;
-    permissions +=
-        S_ISDIR(st.st_mode) ? 'd' : (S_ISLNK(st.st_mode) ? 'l' : '-');
-    for (const mode_t bit : {S_IRUSR, S_IWUSR, S_IXUSR, S_IRGRP, S_IWGRP,
-                             S_IXGRP, S_IROTH, S_IWOTH, S_IXOTH}) {
-        if ((st.st_mode & bit) == 0) {
-            permissions += '-';
-        } else if (bit == S_IRUSR || bit == S_IRGRP || bit == S_IROTH) {
-            permissions += 'r';
-        } else if (bit == S_IWUSR || bit == S_IWGRP || bit == S_IWOTH) {
-            permissions += 'w';
-        } else {
-            permissions += 'x';
-        }
-    }
-    return permissions;
-}
-
-static std::string human_size(std::uintmax_t bytes) {
-    const std::array<std::string, 5> units = {"B", "K", "M", "G", "T"};
-    auto size = static_cast<double>(bytes);
-    std::size_t unit = 0;
-    while (size >= 1024.0 && unit + 1 < units.size()) {
-        size /= 1024.0;
-        ++unit;
-    }
-
-    std::ostringstream out;
-    if (unit == 0) {
-        out << bytes << units[unit];
-    } else {
-        out.setf(std::ios::fixed);
-        out.precision(size < 10.0 ? 1 : 0);
-        out << size << units[unit];
-    }
-    return out.str();
-}
-
-static std::optional<std::string> tmux_ls_preview(const std::string& path) {
-    std::vector<std::string> rows;
-    std::error_code ec;
-    for (const auto& entry : fs::directory_iterator(path, ec)) {
-        if (ec) {
-            return std::nullopt;
-        }
-        const auto size =
-            entry.is_regular_file(ec) ? fs::file_size(entry.path(), ec) : 0;
-        rows.push_back(format_permissions(entry.path()) + " " +
-                       entry.path().filename().string() + " " +
-                       human_size(size));
-    }
-    std::ranges::sort(rows, [](std::string left, std::string right) {
-        std::ranges::transform(left, left.begin(), [](unsigned char ch) {
-            return std::tolower(ch);
-        });
-        std::ranges::transform(right, right.begin(), [](unsigned char ch) {
-            return std::tolower(ch);
-        });
-        return left < right;
-    });
-
-    std::ostringstream out;
-    for (std::size_t i = 0; i < rows.size(); ++i) {
-        if (i != 0) {
-            out << '\n';
-        }
-        out << rows[i];
-    }
-    return out.str();
-}
-
 std::vector<TmuxSession> tmux_paths_and_sessions() {
     const auto dirs = tmux_dirs();
     const auto active = tmux_sessions();
@@ -150,15 +71,13 @@ std::vector<TmuxSession> tmux_paths_and_sessions() {
         path_names.insert(name);
         sessions.push_back({.full_path = full_path,
                             .session_name = name,
-                            .is_active = contains(active, name),
-                            .preview = tmux_ls_preview(full_path)});
+                            .is_active = contains(active, name)});
     }
     for (const auto& name : active) {
         if (!path_names.contains(name)) {
             sessions.push_back({.full_path = std::nullopt,
                                 .session_name = name,
-                                .is_active = true,
-                                .preview = std::nullopt});
+                                .is_active = true});
         }
     }
     return sessions;
@@ -227,20 +146,12 @@ std::vector<SshHost> parse_ssh_config(const fs::path& path) {
     return hosts;
 }
 
-static std::string column_field(const std::string& line,
-                                const std::vector<std::size_t>& starts,
-                                std::size_t index) {
-    if (index >= starts.size() || starts[index] >= line.size()) {
-        return {};
-    }
-    const auto end =
-        index + 1 < starts.size() ? starts[index + 1] : line.size();
-    return trim(
-        line.substr(starts[index], std::min(end, line.size()) - starts[index]));
-}
+std::vector<DockerContainer> docker_containers() {
+    const char* command[] = {
+        "docker", "ps", "-a",
+        "--format", "{{.Names}}\t{{.Status}}"
+    };
 
-std::vector<DockerContainer> parse_docker_containers() {
-    const char* command[] = {"docker", "ps", "-a"};
     const auto result = run_command(command);
     std::vector<DockerContainer> containers;
     if (result.exit_code != 0) {
@@ -248,47 +159,25 @@ std::vector<DockerContainer> parse_docker_containers() {
     }
 
     std::istringstream stream(result.output);
-    std::string header;
-    if (!std::getline(stream, header)) {
-        return containers;
-    }
-
-    const std::array<std::string, 7> columns = {
-        "CONTAINER ID", "IMAGE", "COMMAND", "CREATED",
-        "STATUS",       "PORTS", "NAMES"};
-    std::vector<std::size_t> starts;
-    for (const auto& column : columns) {
-        if (const auto pos = header.find(column); pos != std::string::npos) {
-            starts.push_back(pos);
-        }
-    }
 
     for (std::string line; std::getline(stream, line);) {
         if (trim(line).empty()) {
             continue;
         }
-        DockerContainer container;
-        container.id = column_field(line, starts, 0);
-        container.image = column_field(line, starts, 1);
-        container.command = column_field(line, starts, 2);
-        container.created_at = column_field(line, starts, 3);
-        container.status_text = column_field(line, starts, 4);
-        container.ports = column_field(line, starts, 5);
-        container.name = column_field(line, starts, 6);
-        container.status = container.status_text.contains("Up");
-        containers.push_back(std::move(container));
-    }
+        DockerContainer container{};
+        std::size_t separator = line.find('\t');
+        if ( separator == std::string::npos) continue;
 
-    const auto sessions = tmux_sessions();
-    for (auto& container : containers) {
-        container.is_active_tmux = contains(sessions, container.name);
+        container.name = line.substr(0, separator);
+        container.status = line.substr(separator + 1).contains("Up");
+        containers.push_back(std::move(container));
     }
     return containers;
 }
 
 AppData load_app_data() {
     return {.hosts = parse_ssh_config(home_dir() / ".ssh" / "config"),
-            .containers = parse_docker_containers(),
+            .containers = docker_containers(),
             .tmux_sessions = tmux_paths_and_sessions()};
 }
 

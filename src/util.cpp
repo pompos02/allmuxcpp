@@ -14,15 +14,6 @@ std::string trim(std::string value) {
     return value.substr(begin, end - begin + 1);
 }
 
-std::string shell_quote(std::string_view value) {
-    std::string quoted = "'";
-    for (const char ch : value) {
-        quoted += ch == '\'' ? "'\\''" : std::string(1, ch);
-    }
-    quoted += "'";
-    return quoted;
-}
-
 std::filesystem::path home_dir() {
     if (const char* home = std::getenv("HOME")) {
         return home;

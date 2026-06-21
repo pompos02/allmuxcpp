@@ -8,7 +8,6 @@
 namespace allmux {
 
 [[nodiscard]] std::string trim(std::string value);
-[[nodiscard]] std::string shell_quote(std::string_view value);
 [[nodiscard]] std::filesystem::path home_dir();
 [[nodiscard]] std::filesystem::path config_dir();
 [[nodiscard]] bool contains(const std::vector<std::string>& values,

@@ -31,8 +31,8 @@ static std::string new_session_at(const std::string& name,
                                   const std::optional<std::string>& path) {
     const auto start_path = path.value_or(home_dir().string());
 
-    std::string quoted_name = shell_quote(name);
-    std::string quoted_path = shell_quote(start_path);
+    std::string quoted_name = name;
+    std::string quoted_path = start_path;
 
     const char* command[] = {
         "tmux",
@@ -40,7 +40,7 @@ static std::string new_session_at(const std::string& name,
         "-d",
         "-P",
         "-F",
-        "'#{session_name}:#{window_index}.#{pane_index}'",
+        "#{session_name}:#{window_index}.#{pane_index}",
         "-s",
         quoted_name.c_str(),
         "-c",
@@ -57,16 +57,25 @@ static std::string new_session_at(const std::string& name,
 
 static void send_keys(const std::string& pane_target,
                       const std::string& command) {
-    const auto status = run_status("tmux send-keys -t " +
-                                   shell_quote(pane_target) + " " +
-                                   shell_quote(command) + " C-m");
-    if (status != 0) {
-        throw std::runtime_error("tmux send-keys failed");
+	const char* args[] = {
+		"tmux",
+		"send-keys",
+		"-t",
+		pane_target.c_str(),
+		command.c_str(),
+		"C-m",
+	};
+
+	const auto result = run_command(args);
+    if (result.exit_code != 0) {
+        throw std::runtime_error(
+            std::format("tmux send-keys failed\n run: {}\n error: {}", command,
+                        trim(result.output)));
     }
 }
 
 static void goto_session(const std::string& name) {
-    if (run_status("tmux switch-client -t " + shell_quote(name)) != 0) {
+    if ((run_status("tmux switch-client -t " + name)) != 0) {
         throw std::runtime_error("failed to go to tmux session");
     }
 }
@@ -98,7 +107,7 @@ void launch_tmux_session(const std::string& session_name,
 }
 
 bool copy_to_tmux_clipboard(const std::string& value) {
-    return run_status("printf %s " + shell_quote(value) +
+    return run_status("printf %s " + value +
                       " | tmux load-buffer -w -") == 0;
 }
 

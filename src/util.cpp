@@ -1,9 +1,17 @@
 #include "allmux/util.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 
 namespace allmux {
+
+std::string str_tolower(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+
+    return s;
+}
 
 std::string trim(std::string value) {
     const auto begin = value.find_first_not_of(" \t\r\n");

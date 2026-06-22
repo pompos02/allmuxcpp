@@ -12,7 +12,9 @@
 #include <algorithm>
 #include <cctype>
 #include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace allmux {
@@ -22,38 +24,20 @@ using namespace ftxui;
 struct Match {
     std::size_t index = 0;
     int score = 0;
+    std::vector<std::size_t> matched_indices;
 };
-
-enum class DockerStatus {
-    Running,
-    Stopped,
-};
-
-constexpr std::string_view to_string_view(DockerStatus status) {
-    switch (status) {
-        case DockerStatus::Running: return "running";
-        case DockerStatus::Stopped: return "stopped";
-    }
-    return "unknown";
-}
 
 struct App {
     std::vector<Entry> entries;
     std::string query;
     std::size_t selected = 0;
-    bool loading = true;
-    std::optional<std::string> error;
-    std::optional<std::string> status; // Docker status running/stopped
+    std::optional<std::string> status;
     Color status_color = Color::Default;
-
-    [[nodiscard]]
-    std::vector<Match> filtered_matches() const;
 };
 
 [[nodiscard]]
 std::string docker_status_label(const DockerContainer& container) {
-    auto label = container.status ? DockerStatus::Running : DockerStatus::Stopped;
-    return std::string(to_string_view(label));
+    return container.status ? "running" : "stopped";
 }
 
 [[nodiscard]] std::string tmux_display_text(const TmuxSession& session) {
@@ -74,13 +58,9 @@ std::string docker_status_label(const DockerContainer& container) {
 }
 
 [[nodiscard]] int type_rank(const Entry& entry) {
-    if (std::holds_alternative<TmuxSession>(entry.data)) {
-        return 3;
-    }
-    if (std::holds_alternative<SshHost>(entry.data)) {
-        return 2;
-    }
-    return 1;
+    return std::holds_alternative<TmuxSession>(entry.data) ? 3
+         : std::holds_alternative<SshHost>(entry.data) ? 2
+                                                        : 1;
 }
 
 [[nodiscard]] std::vector<std::string> search_fields(const Entry& entry) {
@@ -99,19 +79,24 @@ std::string docker_status_label(const DockerContainer& container) {
             session.full_path.value_or(""), "tmux", "mux"};
 }
 
-std::vector<Match> App::filtered_matches() const {
+[[nodiscard]] std::vector<Match> filtered_matches(const App& app) {
     std::vector<Match> matches;
-    for (std::size_t i = 0; i < entries.size(); ++i) {
-        const auto match = fuzzy_match(join_fields(search_fields(entries[i])), query);
+    for (std::size_t i = 0; i < app.entries.size(); ++i) {
+        const auto joined = join_fields(search_fields(app.entries[i]));
+        std::vector<std::size_t> out_buffer(joined.size());
+        const auto match = fuzzy_match(joined, app.query, out_buffer);
         if (!match.matched) {
             continue;
         }
-        matches.push_back({.index = i, .score = match.score});
+        matches.push_back({.index = i,
+                           .score = match.score,
+                           .matched_indices = {match.matched_indices.begin(),
+                                               match.matched_indices.end()}});
     }
 
     std::ranges::sort(matches, [&](const Match& left, const Match& right) {
-        const auto& left_entry = entries[left.index];
-        const auto& right_entry = entries[right.index];
+        const auto& left_entry = app.entries[left.index];
+        const auto& right_entry = app.entries[right.index];
         if (left.score != right.score) {
             return left.score > right.score;
         }
@@ -130,51 +115,70 @@ std::vector<Match> App::filtered_matches() const {
     return selected ? bgcolor(Color::GrayDark) | bold : nothing;
 }
 
-[[nodiscard]] Element entry_line(const Entry& entry, bool selected) {
-    const std::string active = is_active_tmux(entry) ? "*" : "";
-    const auto marker = selected ? "▌ " : "  ";
-
-    auto add_active = [&](Elements& line) {
-        if (!active.empty()) {
-            line.push_back(text(active) | color(Color::Green) | bold |
-                           selected_style(selected));
+[[nodiscard]] Element highlighted_text(std::string_view value,
+                                       std::span<const std::size_t> indices,
+                                       std::size_t offset,
+                                       Color base_color,
+                                       bool selected) {
+    Elements parts;
+    for (std::size_t pos = 0; pos < value.size();) {
+        const bool matched = std::ranges::binary_search(indices, offset + pos);
+        auto end = pos + 1;
+        while (end < value.size() &&
+               std::ranges::binary_search(indices, offset + end) == matched) {
+            ++end;
         }
-    };
+
+        auto style = color(matched ? Color::Yellow : base_color) |
+                     selected_style(selected);
+        if (matched) {
+            style = style | bold;
+        }
+        parts.push_back(text(std::string{value.substr(pos, end - pos)}) |
+                        style);
+        pos = end;
+    }
+    return hbox(std::move(parts));
+}
+
+[[nodiscard]] Element entry_line(const Entry& entry,
+                                 std::span<const std::size_t> matched_indices,
+                                 bool selected) {
+    Color accent = Color::Green;
+    Color detail_color = Color::GrayDark;
+    std::string icon = " ";
+    std::string primary;
+    std::optional<std::string> detail;
 
     if (const auto* host = std::get_if<SshHost>(&entry.data)) {
-        Elements line = {text(marker) | color(Color::Cyan) | selected_style(selected),
-                          text(" ") | color(Color::Cyan) | bold |
-                              selected_style(selected),
-                         text(host->alias) | color(Color::White) |
-                             selected_style(selected)};
-        add_active(line);
-        line.push_back(text("  ") | selected_style(selected));
-        line.push_back(text(host->hostname) | color(Color::GrayDark) |
-                       selected_style(selected));
-        return hbox(std::move(line));
+        accent = Color::Cyan;
+        icon = " ";
+        primary = host->alias;
+        detail = host->hostname;
+    } else if (const auto* container = std::get_if<DockerContainer>(&entry.data)) {
+        accent = Color::Blue;
+        icon = " ";
+        primary = container->name;
+        detail = docker_status_label(*container);
+        detail_color = container->status ? Color::Green : Color::Red;
+    } else {
+        primary = tmux_display_text(std::get<TmuxSession>(entry.data));
     }
 
-    if (const auto* container = std::get_if<DockerContainer>(&entry.data)) {
-        const auto status_color = container->status ? Color::Green : Color::Red;
-        Elements line = {text(marker) | color(Color::Blue) | selected_style(selected),
-                          text(" ") | color(Color::Blue) | bold |
-                              selected_style(selected),
-                         text(container->name) | color(Color::White) |
-                             selected_style(selected)};
-        add_active(line);
-        line.push_back(text("  ") | selected_style(selected));
-        line.push_back(text(docker_status_label(*container)) | color(status_color) |
-                       selected_style(selected));
-        return hbox(std::move(line));
+    const auto style = selected_style(selected);
+    Elements line = {text(selected ? "▌ " : "  ") | color(accent) | style,
+                     text(icon) | color(accent) | bold | style,
+                     highlighted_text(primary, matched_indices, 0, Color::White,
+                                      selected)};
+    if (is_active_tmux(entry)) {
+        line.push_back(text("*") | color(Color::Green) | bold | style);
     }
-
-    const auto& session = std::get<TmuxSession>(entry.data);
-    Elements line = {text(marker) | color(Color::Green) | selected_style(selected),
-                      text(" ") | color(Color::Green) | bold |
-                          selected_style(selected),
-                     text(tmux_display_text(session)) | color(Color::White) |
-                         selected_style(selected)};
-    add_active(line);
+    if (detail) {
+        line.push_back(text("  ") | style);
+        line.push_back(highlighted_text(*detail, matched_indices,
+                                        primary.size() + 1, detail_color,
+                                        selected));
+    }
     return hbox(std::move(line));
 }
 
@@ -189,13 +193,7 @@ std::vector<Match> App::filtered_matches() const {
     return hbox(std::move(line));
 }
 
-[[nodiscard]] std::optional<UiAction> selected_action(const App& app) {
-    const auto matches = app.filtered_matches();
-    if (matches.empty() || app.selected >= matches.size()) {
-        return std::nullopt;
-    }
-
-    const auto& entry = app.entries[matches[app.selected].index];
+[[nodiscard]] UiAction action_for(const Entry& entry) {
     if (const auto* host = std::get_if<SshHost>(&entry.data)) {
         return UiAction{.type = UiAction::Type::ssh,
                         .name = host->alias,
@@ -212,20 +210,6 @@ std::vector<Match> App::filtered_matches() const {
                     .path = session.full_path};
 }
 
-[[nodiscard]] std::optional<std::string> selected_ssh_hostname(const App& app) {
-    const auto matches = app.filtered_matches();
-    if (matches.empty() || app.selected >= matches.size()) {
-        return std::nullopt;
-    }
-
-    const auto& entry = app.entries[matches[app.selected].index];
-    if (const auto* host = std::get_if<SshHost>(&entry.data);
-        host != nullptr && !host->hostname.empty()) {
-        return host->hostname;
-    }
-    return std::nullopt;
-}
-
 void delete_previous_word(std::string& query) {
     while (!query.empty() && std::isspace(static_cast<unsigned char>(query.back()))) {
         query.pop_back();
@@ -237,15 +221,14 @@ void delete_previous_word(std::string& query) {
 
 [[nodiscard]] App make_app(AppData data) {
     App app;
-    for (auto& host : data.hosts) {
-        app.entries.push_back({.data = std::move(host)});
-    }
-    for (auto& container : data.containers) {
-        app.entries.push_back({.data = std::move(container)});
-    }
-    for (auto& session : data.tmux_sessions) {
-        app.entries.push_back({.data = std::move(session)});
-    }
+    auto append = [&](auto& values) {
+        for (auto& value : values) {
+            app.entries.push_back({.data = std::move(value)});
+        }
+    };
+    append(data.hosts);
+    append(data.containers);
+    append(data.tmux_sessions);
     return app;
 }
 
@@ -257,11 +240,12 @@ std::optional<UiAction> run_ui(AppData data) {
     std::optional<UiAction> action;
 
     auto renderer = Renderer([&] {
-        const auto matches = app.filtered_matches();
+        const auto matches = filtered_matches(app);
         Elements visible;
         for (std::size_t i = 0; i < matches.size(); ++i) {
             const auto& match = matches[i];
-            auto line = entry_line(app.entries[match.index], i == app.selected);
+            auto line = entry_line(app.entries[match.index], match.matched_indices,
+                                   i == app.selected);
             if (i == app.selected) {
                 line = line | focus;
             }
@@ -278,7 +262,11 @@ std::optional<UiAction> run_ui(AppData data) {
     });
 
     auto component = CatchEvent(renderer, [&](Event event) {
-        const auto matches = app.filtered_matches();
+        const auto matches = filtered_matches(app);
+        const Entry* selected_entry = nullptr;
+        if (!matches.empty() && app.selected < matches.size()) {
+            selected_entry = &app.entries[matches[app.selected].index];
+        }
         const auto quit = [&] {
             screen.ExitLoopClosure()();
             return true;
@@ -289,9 +277,10 @@ std::optional<UiAction> run_ui(AppData data) {
             return quit();
         }
         if (event == Event::Return) {
-            action = selected_action(app);
-            screen.ExitLoopClosure()();
-            return true;
+            if (selected_entry != nullptr) {
+                action = action_for(*selected_entry);
+            }
+            return quit();
         }
         if (event == Event::ArrowUp || event == Event::CtrlK) {
             if (app.selected > 0) {
@@ -314,27 +303,13 @@ std::optional<UiAction> run_ui(AppData data) {
                                     matches.empty() ? 0 : matches.size() - 1);
             return true;
         }
-        if (event == Event::Backspace) {
-            if (!app.query.empty()) {
-                app.query.pop_back();
-            }
-            app.status.reset();
-            return true;
-        }
-        if (event == Event::CtrlU) {
-            app.query.clear();
-            app.status.reset();
-            return true;
-        }
-        if (event == Event::CtrlW) {
-            delete_previous_word(app.query);
-            app.status.reset();
-            return true;
-        }
         if (event == Event::CtrlY) {
-            if (const auto hostname = selected_ssh_hostname(app)) {
-                if (copy_to_tmux_clipboard(*hostname)) {
-                    app.status = "Copied hostname: " + *hostname;
+            const auto* host = selected_entry != nullptr
+                                   ? std::get_if<SshHost>(&selected_entry->data)
+                                   : nullptr;
+            if (host != nullptr && !host->hostname.empty()) {
+                if (copy_to_tmux_clipboard(host->hostname)) {
+                    app.status = "Copied hostname: " + host->hostname;
                     app.status_color = Color::Green;
                 } else {
                     app.status = "Failed to copy hostname";
@@ -346,9 +321,18 @@ std::optional<UiAction> run_ui(AppData data) {
             }
             return true;
         }
-        if (event.is_character()) {
-            app.query += event.character();
-            app.selected = 0;
+        if (event == Event::Backspace || event == Event::CtrlU ||
+            event == Event::CtrlW || event.is_character()) {
+            if (event == Event::Backspace && !app.query.empty()) {
+                app.query.pop_back();
+            } else if (event == Event::CtrlU) {
+                app.query.clear();
+            } else if (event == Event::CtrlW) {
+                delete_previous_word(app.query);
+            } else if (event.is_character()) {
+                app.query += event.character();
+                app.selected = 0;
+            }
             app.status.reset();
             return true;
         }

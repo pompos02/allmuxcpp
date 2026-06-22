@@ -13,5 +13,7 @@ namespace allmux {
 [[nodiscard]] bool contains(const std::vector<std::string>& values,
                             std::string_view value);
 [[nodiscard]] std::string join_fields(const std::vector<std::string>& fields);
+[[nodiscard]] std::string str_tolower(std::string s);
+
 
 } // namespace allmux

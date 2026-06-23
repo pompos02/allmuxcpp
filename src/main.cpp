@@ -1,4 +1,3 @@
-#include "allmux/parser.hpp"
 #include "allmux/tmux.hpp"
 #include "allmux/ui.hpp"
 
@@ -8,13 +7,12 @@
 // Main function
 int main() {
     try {
-        auto active_sessions = allmux::tmux_sessions();
-        auto data = allmux::load_app_data(active_sessions);
-        const auto action = allmux::run_ui(std::move(data));
-
+        const auto action = allmux::run_ui();
         if (!action) {
             return 0;
         }
+
+        const auto active_sessions = allmux::tmux_sessions();
 
         switch (action->type) {
         case allmux::UiAction::Type::ssh:

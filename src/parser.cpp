@@ -2,12 +2,14 @@
 
 #include "allmux/process.hpp"
 #include "allmux/util.hpp"
-#include "allmux/tmux.hpp"
 
 #include <algorithm>
+#include <boost/asio/post.hpp>
+#include <boost/asio/thread_pool.hpp>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -72,7 +74,7 @@ static std::vector<TmuxDir> tmux_dirs() {
     return dirs;
 }
 
-std::vector<TmuxSession> tmux_paths_and_sessions(std::span<std::string> active_sesssions) {
+std::vector<TmuxSession> tmux_paths_and_sessions(std::span<std::string> const active_sesssions) {
     const auto dirs = tmux_dirs();
     std::set<std::string> path_names;
     std::vector<TmuxSession> sessions;
@@ -87,7 +89,7 @@ std::vector<TmuxSession> tmux_paths_and_sessions(std::span<std::string> active_s
     return sessions;
 }
 
-std::vector<SshHost> ssh_hosts(const fs::path& path, std::span<std::string> active_sesssions) {
+std::vector<SshHost> ssh_hosts(const fs::path& path,const std::span<std::string> active_sesssions) {
     std::ifstream input{path};
     if (!input) {
         throw std::runtime_error(
@@ -151,7 +153,7 @@ std::vector<SshHost> ssh_hosts(const fs::path& path, std::span<std::string> acti
     return hosts;
 }
 
-std::vector<DockerContainer> docker_containers(std::span<std::string> active_sesssions) {
+std::vector<DockerContainer> docker_containers(std::span<std::string> const active_sesssions) {
     const char* command[] = {
         "docker", "ps", "-a",
         "--format", "{{.Names}}\t{{.Status}}"
@@ -186,6 +188,43 @@ AppData load_app_data(std::span<std::string> active_sesssions) {
     return {.hosts = ssh_hosts(home_dir() / ".ssh" / "config", active_sesssions),
             .containers = docker_containers(active_sesssions),
             .tmux_sessions = tmux_paths_and_sessions(active_sesssions)};
+}
+
+template <class Fn>
+auto submit(boost::asio::thread_pool& pool, Fn fn)
+    -> std::future<std::invoke_result_t<Fn>> 
+{
+    using Result = std::invoke_result_t<Fn>;
+
+    auto task = std::make_shared<std::packaged_task<Result()>>(std::move(fn));
+    auto future = task->get_future();
+
+    boost::asio::post(pool, [task] {
+        (*task)();
+    });
+
+    return future;
+}
+
+AppData load_app_data_parallel(std::span<std::string> active_sesssions,
+                               boost::asio::thread_pool& pool) {
+    auto f_hosts = submit(pool, [&] {
+        return ssh_hosts(home_dir() / ".ssh" / "config", active_sesssions);
+    });
+
+    auto f_containers = submit(pool, [&] {
+        return docker_containers(active_sesssions);
+    });
+
+    auto f_sessions = submit(pool, [&] {
+            return tmux_paths_and_sessions(active_sesssions);
+    });
+
+    return {
+        .hosts = f_hosts.get(),
+        .containers = f_containers.get(),
+        .tmux_sessions = f_sessions.get(),
+    };
 }
 
 } // namespace allmux

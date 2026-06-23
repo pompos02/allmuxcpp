@@ -6,6 +6,6 @@
 
 namespace allmux {
 
-[[nodiscard]] std::optional<UiAction> run_ui(AppData data);
+[[nodiscard]] std::optional<UiAction> run_ui();
 
 } // namespace allmux

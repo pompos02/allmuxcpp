@@ -1,8 +1,12 @@
 #include "allmux/ui.hpp"
 
 #include "allmux/fuzzy.hpp"
+#include "allmux/parser.hpp"
 #include "allmux/tmux.hpp"
 #include "allmux/util.hpp"
+
+#include <boost/asio/post.hpp>
+#include <boost/asio/thread_pool.hpp>
 
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
@@ -16,6 +20,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <exception>
 
 namespace allmux {
 namespace {
@@ -31,6 +36,8 @@ struct App {
     std::vector<Entry> entries;
     std::string query;
     std::size_t selected = 0;
+    std::optional<std::string> error;
+    bool loading = true;
     std::optional<std::string> status;
     Color status_color = Color::Default;
 };
@@ -229,29 +236,61 @@ void delete_previous_word(std::string& query) {
     append(data.hosts);
     append(data.containers);
     append(data.tmux_sessions);
+    app.loading = false;
     return app;
 }
 
 } // namespace
 
-std::optional<UiAction> run_ui(AppData data) {
-    auto app = make_app(std::move(data));
+std::optional<UiAction> run_ui() {
+    App app;
     auto screen = ScreenInteractive::Fullscreen();
     std::optional<UiAction> action;
+
+    boost::asio::thread_pool pool{4};
+
+    boost::asio::post(pool, [&] {
+        try {
+            auto active_sessions = tmux_sessions();
+            auto data = load_app_data_parallel(active_sessions, pool);
+            // auto data = load_app_data(active_sessions);
+
+            screen.Post([&, data = std::move(data)]() mutable {
+                app = make_app(std::move(data));
+                app.selected = 0;
+                app.status.reset();
+            });
+        } catch (const std::exception& error) {
+            std::string message = error.what();
+
+            screen.Post([&, message = std::move(message)] {
+                app.loading = false;
+                app.error = message;
+                app.status.reset();
+            });
+        }
+        screen.PostEvent(Event::Custom);
+    });
+
 
     auto renderer = Renderer([&] {
         const auto matches = filtered_matches(app);
         Elements visible;
         for (std::size_t i = 0; i < matches.size(); ++i) {
             const auto& match = matches[i];
-            auto line = entry_line(app.entries[match.index], match.matched_indices,
-                                   i == app.selected);
+            auto line = entry_line(app.entries[match.index], match.matched_indices, i == app.selected);
             if (i == app.selected) {
                 line = line | focus;
             }
             visible.push_back(line);
         }
-        if (visible.empty()) {
+        if (app.loading) {
+            visible.push_back(text("Loading entries...") |
+                              color(Color::GrayDark));
+        } else if (app.error) {
+            visible.push_back(text("failed to load entries: " + *app.error) |
+                              color(Color::Red));
+        } else if (visible.empty()) {
             visible.push_back(text("No entries match the current search.") |
                               color(Color::GrayDark));
         }
@@ -277,9 +316,10 @@ std::optional<UiAction> run_ui(AppData data) {
             return quit();
         }
         if (event == Event::Return) {
-            if (selected_entry != nullptr) {
-                action = action_for(*selected_entry);
+            if (app.loading || app.error || selected_entry == nullptr) {
+                return true;
             }
+            action = action_for(*selected_entry);
             return quit();
         }
         if (event == Event::ArrowUp || event == Event::CtrlK) {

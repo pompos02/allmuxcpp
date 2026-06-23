@@ -8,8 +8,8 @@
 // Main function
 int main() {
     try {
-        auto data = allmux::load_app_data();
-        const auto active_sessions = allmux::tmux_sessions();
+        auto active_sessions = allmux::tmux_sessions();
+        auto data = allmux::load_app_data(active_sessions);
         const auto action = allmux::run_ui(std::move(data));
 
         if (!action) {

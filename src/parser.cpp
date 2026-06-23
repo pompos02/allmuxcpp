@@ -182,8 +182,7 @@ std::vector<DockerContainer> docker_containers(std::span<std::string> active_ses
     return containers;
 }
 
-AppData load_app_data() {
-    auto active_sesssions = tmux_sessions();
+AppData load_app_data(std::span<std::string> active_sesssions) {
     return {.hosts = ssh_hosts(home_dir() / ".ssh" / "config", active_sesssions),
             .containers = docker_containers(active_sesssions),
             .tmux_sessions = tmux_paths_and_sessions(active_sesssions)};

@@ -49,4 +49,4 @@ target_link_libraries(allmuxcpp
     rapidfuzz::rapidfuzz
 )
 
-target_compile_options(allmuxcpp PRIVATE -Wall -Wextra -Wpedantic -O3)
+target_compile_options(allmuxcpp PRIVATE -Wall -Wextra -Wpedantic)

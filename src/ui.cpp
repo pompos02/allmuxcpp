@@ -8,6 +8,8 @@
 #include <boost/asio/post.hpp>
 #include <boost/asio/thread_pool.hpp>
 
+#include <cstdlib>
+#include <fstream>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
 #include <ftxui/component/screen_interactive.hpp>
@@ -15,12 +17,18 @@
 
 #include <algorithm>
 #include <cctype>
+#include <ios>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 #include <exception>
+#include <filesystem>
+
+inline constexpr std::string_view ALLMUX_THEME_FILE_NAME =  "color_variant";
+
 
 namespace allmux {
 namespace {
@@ -40,7 +48,75 @@ struct App {
     bool loading = true;
     std::optional<std::string> status;
     Color status_color = Color::Default;
+    bool color_variant = true;
 };
+
+namespace fs = std::filesystem;
+/// Get allmux cache file path, if not there, create it
+fs::path cache_path() {
+    auto home_path = fs::path(std::getenv("HOME"));
+    fs::path allmux_dir = home_path / ".cache" / "allmux";
+    fs::create_directories(allmux_dir);
+    return allmux_dir;
+}
+
+/// @return 'true' if dark 'false' for light (defaults to dark)
+bool is_dark_variant() {
+    fs::path cache_p = cache_path();
+    fs::path theme_file = cache_p / ALLMUX_THEME_FILE_NAME;
+
+    // Create the theme file if it doesn't exists
+    if (!fs::exists(theme_file)) {
+        std::ofstream f(theme_file);
+        if (f.is_open()) {
+            f << "dark";
+        } else {
+            throw std::runtime_error("failed to create: " + theme_file.string());
+        }
+    }
+    std::ifstream input_file(theme_file);
+    std::string line{};
+    if (input_file.is_open()) {
+        std::getline(input_file, line);
+    }
+    line = trim(line);
+    if (line == "light") {
+        return false;
+    }
+    return true;
+}
+
+fs::path theme_file() {
+    fs::path cache_p = cache_path();
+    fs::path theme_file = cache_p / ALLMUX_THEME_FILE_NAME;
+
+    // Create the theme file if it doesn't exists
+    if (!fs::exists(theme_file)) {
+        std::ofstream f(theme_file);
+        if (f.is_open()) {
+            f << "dark";
+        } else {
+            throw std::runtime_error("failed to create: " + theme_file.string());
+        }
+    }
+    return theme_file;
+}
+
+bool toggle_variant() {
+    auto path = theme_file();
+    const bool is_dark = is_dark_variant();
+    std::ofstream file(path);
+    if (!file.is_open()) {
+        throw std::runtime_error("Error opening: " + path.string());
+    }
+    if (is_dark) {
+        file << "light";
+        return false;
+    } else {
+        file << "dark";
+        return true;
+    }
+}
 
 [[nodiscard]]
 std::string docker_status_label(const DockerContainer& container) {
@@ -118,15 +194,20 @@ std::string docker_status_label(const DockerContainer& container) {
     return matches;
 }
 
-[[nodiscard]] Decorator selected_style(bool selected) {
-    return selected ? bgcolor(Color::GrayDark) | bold : nothing;
+[[nodiscard]] Decorator selected_style(bool selected, bool is_dark) {
+    if (is_dark) {
+        return selected ? bgcolor(Color::GrayDark) | bold : nothing;
+    }
+
+    return selected ? bgcolor(Color::RGB(246, 246, 246)) | bold : nothing;
 }
 
 [[nodiscard]] Element highlighted_text(std::string_view value,
                                        std::span<const std::size_t> indices,
                                        std::size_t offset,
                                        Color base_color,
-                                       bool selected) {
+                                       bool selected,
+                                       bool is_dark) {
     Elements parts;
     for (std::size_t pos = 0; pos < value.size();) {
         const bool matched = std::ranges::binary_search(indices, offset + pos);
@@ -136,10 +217,17 @@ std::string docker_status_label(const DockerContainer& container) {
             ++end;
         }
 
-        auto style = matched ? color(Color::RGB(0, 0, 0)) | bgcolor(Color::Cyan)
-                             : color(base_color);
+        Decorator style;
+        if (is_dark) {
+            style = matched ? color(Color::RGB(0, 0, 0)) | bgcolor(Color::Cyan)
+                : color(base_color);
+            style = style | selected_style(selected, is_dark);
+        } else {
+            style = matched ? color(Color::RGB(0, 0, 0)) | bgcolor(Color::Cyan)
+                : color(base_color);
+            style = style | selected_style(selected, is_dark);
+        }
 
-        style = style | selected_style(selected);
 
         if (matched) {
             style = style | bold;
@@ -151,9 +239,12 @@ std::string docker_status_label(const DockerContainer& container) {
     return hbox(std::move(parts));
 }
 
-[[nodiscard]] Element entry_line(const Entry& entry,
-                                 std::span<const std::size_t> matched_indices,
-                                 bool selected) {
+[[nodiscard]]
+Element entry_line(const Entry& entry,
+                   std::span<const std::size_t> matched_indices,
+                   bool selected, bool is_dark)
+{
+
     Color accent = Color::Green;
     Color detail_color = Color::GrayDark;
     std::string icon = " ";
@@ -175,11 +266,11 @@ std::string docker_status_label(const DockerContainer& container) {
         primary = tmux_display_text(std::get<TmuxSession>(entry.data));
     }
 
-    const auto style = selected_style(selected);
+    const auto style = selected_style(selected, is_dark);
     Elements line = {text(selected ? "▌ " : "  ") | color(accent) | style,
                      text(icon) | color(accent) | bold | style,
                      highlighted_text(primary, matched_indices, 0, Color::White,
-                                      selected)};
+                                      selected, is_dark)};
     if (is_active_tmux(entry)) {
         line.push_back(text("*") | color(Color::Green) | bold | style);
     }
@@ -187,7 +278,7 @@ std::string docker_status_label(const DockerContainer& container) {
         line.push_back(text("  ") | style);
         line.push_back(highlighted_text(*detail, matched_indices,
                                         primary.size() + 1, detail_color,
-                                        selected));
+                                        selected, is_dark));
     }
     return hbox(std::move(line));
 }
@@ -239,9 +330,11 @@ void delete_previous_word(std::string& query) {
     append(data.hosts);
     append(data.containers);
     append(data.tmux_sessions);
+    app.color_variant = is_dark_variant();
     app.loading = false;
     return app;
 }
+
 
 } // namespace
 
@@ -280,7 +373,7 @@ std::optional<UiAction> run_ui() {
         Elements visible;
         for (std::size_t i = 0; i < matches.size(); ++i) {
             const auto& match = matches[i];
-            auto line = entry_line(app.entries[match.index], match.matched_indices, i == app.selected);
+            auto line = entry_line(app.entries[match.index], match.matched_indices, i == app.selected, app.color_variant);
             if (i == app.selected) {
                 line = line | focus;
             }
@@ -302,6 +395,7 @@ std::optional<UiAction> run_ui() {
                border;
     });
 
+    // Keymaps
     auto component = CatchEvent(renderer, [&](Event event) {
         const auto matches = filtered_matches(app);
         const Entry* selected_entry = nullptr;
@@ -344,6 +438,9 @@ std::optional<UiAction> run_ui() {
             app.selected = std::min(app.selected + 5,
                                     matches.empty() ? 0 : matches.size() - 1);
             return true;
+        }
+        if (event == Event::CtrlT) {
+            app.color_variant = toggle_variant();
         }
         if (event == Event::CtrlY) {
             const auto* host = selected_entry != nullptr

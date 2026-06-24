@@ -136,8 +136,11 @@ std::string docker_status_label(const DockerContainer& container) {
             ++end;
         }
 
-        auto style = color(matched ? Color::Yellow : base_color) |
-                     selected_style(selected);
+        auto style = matched ? color(Color::RGB(0, 0, 0)) | bgcolor(Color::Cyan)
+                             : color(base_color);
+
+        style = style | selected_style(selected);
+
         if (matched) {
             style = style | bold;
         }
@@ -253,7 +256,6 @@ std::optional<UiAction> run_ui() {
         try {
             auto active_sessions = tmux_sessions();
             auto data = load_app_data_parallel(active_sessions, pool);
-            // auto data = load_app_data(active_sessions);
 
             screen.Post([&, data = std::move(data)]() mutable {
                 app = make_app(std::move(data));

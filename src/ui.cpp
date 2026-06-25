@@ -4,6 +4,7 @@
 #include "allmux/parser.hpp"
 #include "allmux/tmux.hpp"
 #include "allmux/util.hpp"
+#include "allmux/history.hpp"
 
 #include <boost/asio/post.hpp>
 #include <boost/asio/thread_pool.hpp>
@@ -17,7 +18,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <ios>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -49,32 +49,25 @@ struct App {
     std::optional<std::string> status;
     Color status_color = Color::Default;
     bool color_variant = true;
+    History history = allmux::History::load_history();
 };
 
 namespace fs = std::filesystem;
-/// Get allmux cache file path, if not there, create it
-fs::path cache_path() {
-    auto home_path = fs::path(std::getenv("HOME"));
-    fs::path allmux_dir = home_path / ".cache" / "allmux";
-    fs::create_directories(allmux_dir);
-    return allmux_dir;
-}
 
 /// @return 'true' if dark 'false' for light (defaults to dark)
 bool is_dark_variant() {
-    fs::path cache_p = cache_path();
-    fs::path theme_file = cache_p / ALLMUX_THEME_FILE_NAME;
+    fs::path color_file = theme_file();
 
     // Create the theme file if it doesn't exists
-    if (!fs::exists(theme_file)) {
-        std::ofstream f(theme_file);
+    if (!fs::exists(color_file)) {
+        std::ofstream f(color_file);
         if (f.is_open()) {
             f << "dark";
         } else {
-            throw std::runtime_error("failed to create: " + theme_file.string());
+            throw std::runtime_error("failed to create: " + color_file.string());
         }
     }
-    std::ifstream input_file(theme_file);
+    std::ifstream input_file(color_file);
     std::string line{};
     if (input_file.is_open()) {
         std::getline(input_file, line);
@@ -84,22 +77,6 @@ bool is_dark_variant() {
         return false;
     }
     return true;
-}
-
-fs::path theme_file() {
-    fs::path cache_p = cache_path();
-    fs::path theme_file = cache_p / ALLMUX_THEME_FILE_NAME;
-
-    // Create the theme file if it doesn't exists
-    if (!fs::exists(theme_file)) {
-        std::ofstream f(theme_file);
-        if (f.is_open()) {
-            f << "dark";
-        } else {
-            throw std::runtime_error("failed to create: " + theme_file.string());
-        }
-    }
-    return theme_file;
 }
 
 bool toggle_variant() {
@@ -415,6 +392,7 @@ std::optional<UiAction> run_ui() {
             if (app.loading || app.error || selected_entry == nullptr) {
                 return true;
             }
+            app.history.record_access(selected_entry->get_key());
             action = action_for(*selected_entry);
             return quit();
         }

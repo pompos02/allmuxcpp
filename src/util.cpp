@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <filesystem>
 
 namespace allmux {
 
@@ -35,6 +36,22 @@ std::filesystem::path config_dir() {
     }
     return home_dir() / ".config";
 }
+
+std::filesystem::path cache_allmux_dir() {
+    auto path = home_dir() / ".cache" / "allmux";
+    std::filesystem::create_directories(path);
+    return path;
+}
+
+
+std::filesystem::path history_file() {
+    return cache_allmux_dir() / "history.tsv";
+}
+
+std::filesystem::path theme_file() {
+    return cache_allmux_dir() / "color_variant";
+}
+
 
 bool contains(const std::vector<std::string>& values, std::string_view value) {
     return std::ranges::find(values, value) != values.end();

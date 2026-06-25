@@ -27,15 +27,19 @@ find_package(Boost CONFIG REQUIRED)
 
 add_executable(${PROJECT_NAME})
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 target_sources(allmuxcpp
   PRIVATE
     src/fuzzy.cpp
+    src/history.cpp
     src/main.cpp
     src/parser.cpp
     src/process.cpp
     src/tmux.cpp
     src/ui.cpp
     src/util.cpp
+    src/history.cpp
 )
 
 target_include_directories(allmuxcpp PRIVATE include)

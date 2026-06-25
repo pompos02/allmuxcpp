@@ -1,7 +1,10 @@
 #pragma once
 
+#include <concepts>
+#include <format>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -37,6 +40,37 @@ using EntryData = std::variant<SshHost, DockerContainer, TmuxSession>;
 
 struct Entry {
     EntryData data;
+
+    // std::string_view get_key() const {
+    //     return std::visit( [](const auto& entry) -> std::string_view {
+    //             using T = std::decay_t<decltype(entry)>;
+    //
+    //             if constexpr (std::same_as<T, SshHost>) {
+    //                 return entry.alias;
+    //             } else if constexpr (std::same_as<T, DockerContainer>) {
+    //                 return entry.name;
+    //             } else if constexpr (std::same_as<T, TmuxSession>) {
+    //                 return entry.basename;
+    //             }
+    //         },
+    //         data);
+    // }
+
+    template<class... Ts>
+    struct Overloaded : Ts... {
+        using Ts::operator()...;
+    };
+
+    template<class... Ts>
+    Overloaded(Ts...) -> Overloaded<Ts...>;
+
+    std::string_view get_key() const {
+        return std::visit(Overloaded{
+            [](const SshHost& s) -> std::string_view {return s.alias;},
+            [](const DockerContainer& d) -> std::string_view {return d.name;},
+            [](const TmuxSession& t) -> std::string_view {return t.basename;},
+        }, data);
+    }
 };
 
 struct UiAction {

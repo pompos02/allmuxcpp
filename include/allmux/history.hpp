@@ -15,6 +15,6 @@ struct History {
 
     static History load_history();
     void record_access(std::string_view key);
-    int64_t score(std::string_view key);
+    int64_t score(std::string_view key) const;
 };
 } // namespace allmux

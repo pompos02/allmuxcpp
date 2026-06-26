@@ -11,9 +11,11 @@
 #include <ios>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <unordered_map>
 #include <ranges>
+#include <charconv>
 
 namespace allmux {
 
@@ -32,32 +34,44 @@ constexpr std::int64_t SECONDS_PER_DAY = 86400;
 constexpr std::int16_t MAX_HISTORY_DAYS = 30;
 constexpr std::size_t MAX_TIMESTAMPS_PER_ENTRY = 128;
 
-void parse_history_line(History& history, std::string_view line) {
+void parse_history_line(History& history, std::string_view line)
+{
     std::size_t tab{line.find('\t')};
-    if (tab == std::string_view::npos) {
+    if (tab == std::string_view::npos)
+    {
         // TODO: maybe handle this more elegantly
         throw std::runtime_error("invalid history line");
     }
 
-    std::string key{line.substr(0, tab)};
+    auto key = std::string{line.substr(0, tab)};
     auto& timestamps = history.entries[key];
-    std::string_view values = line.substr(tab + 1);
-    
-    while (!values.empty()) {
-        std::size_t comma{values.find(',')};
-        if (comma == std::string_view::npos) {
-            break;
-        }
-        auto token = values.substr(0, comma);
-        if (!token.empty()) {
+
+    auto values = line.substr(tab + 1);
+
+    while(!values.empty())
+    {
+        auto comma = values.find(',');
+
+        std::string_view token =
+            (comma == std::string_view::npos) ? values : values.substr(0, comma);
+
+        if (!token.empty())
+        {
             std::int64_t value{};
-            auto [ptr, ec] = std::from_chars( token.data(), token.data() + token.size(), value);
-            if (ec == std::errc{}) {
+            auto [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), value);
+
+            if (ec == std::errc{} && ptr == (token.data() + token.size()))
+            {
                 timestamps.push_back(value);
             }
         }
+        
+        if (comma == std::string_view::npos)
+        {
+            break;
+        }
 
-        values.remove_prefix(comma + 1);
+        values.remove_prefix(comma+1);
     }
 }
 
@@ -109,10 +123,8 @@ void write_to_history_file(std::unordered_map<std::string, std::deque<std::int64
 
 auto History::load_history() -> History {
     auto file = history_file();
-    auto parent = file.parent_path();
     if (!fs::exists(file)) {
-        // TODO: handle this without throwing
-        throw std::runtime_error("Error finding: " + file.string());
+        return {};
     }
 
     std::ifstream f(file);
@@ -149,8 +161,14 @@ void History::record_access(std::string_view key) {
     write_to_history_file(entries);
 }
 
-int64_t History::score(std::string_view key) {
-    auto timestamps = entries[std::string{key}];
+int64_t History::score(std::string_view key) const {
+    auto it = entries.find(std::string{key});
+    if (it == entries.end()) {
+        return 0;
+    }
+
+    auto const& timestamps = it->second;
+
     if (timestamps.empty()) {
         // TODO: notify the user?
         return 0;

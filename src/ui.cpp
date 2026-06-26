@@ -119,8 +119,8 @@ std::string docker_status_label(const DockerContainer& container) {
 
 [[nodiscard]] int type_rank(const Entry& entry) {
     return std::holds_alternative<TmuxSession>(entry.data) ? 3
-         : std::holds_alternative<SshHost>(entry.data) ? 2
-                                                        : 1;
+           : std::holds_alternative<SshHost>(entry.data)   ? 2
+                                                           : 1;
 }
 
 [[nodiscard]] std::vector<std::string> search_fields(const Entry& entry) {
@@ -139,7 +139,8 @@ std::string docker_status_label(const DockerContainer& container) {
             session.full_path.value_or(""), "tmux", "mux"};
 }
 
-[[nodiscard]] std::vector<Match> filtered_matches(const App& app) {
+[[nodiscard]]
+auto filtered_matches(const App& app) -> std::vector<Match> {
     std::vector<Match> matches;
     for (std::size_t i = 0; i < app.entries.size(); ++i) {
         const auto joined = join_fields(search_fields(app.entries[i]));
@@ -148,8 +149,10 @@ std::string docker_status_label(const DockerContainer& container) {
         if (!match.matched) {
             continue;
         }
+        auto base_score = match.score;
+        auto history_score = app.history.score(app.entries[i].get_key());
         matches.push_back({.index = i,
-                           .score = match.score,
+                           .score = static_cast<int>(base_score + ((double)base_score * history_score / 100)),
                            .matched_indices = {match.matched_indices.begin(),
                                                match.matched_indices.end()}});
     }
@@ -219,6 +222,7 @@ std::string docker_status_label(const DockerContainer& container) {
 [[nodiscard]]
 Element entry_line(const Entry& entry,
                    std::span<const std::size_t> matched_indices,
+                   int score,
                    bool selected, bool is_dark)
 {
 
@@ -257,6 +261,10 @@ Element entry_line(const Entry& entry,
                                         primary.size() + 1, detail_color,
                                         selected, is_dark));
     }
+
+    line.push_back(text("  ") | style);
+    line.push_back(text(std::to_string(score)) | style);
+
     return hbox(std::move(line));
 }
 
@@ -350,7 +358,7 @@ std::optional<UiAction> run_ui() {
         Elements visible;
         for (std::size_t i = 0; i < matches.size(); ++i) {
             const auto& match = matches[i];
-            auto line = entry_line(app.entries[match.index], match.matched_indices, i == app.selected, app.color_variant);
+            auto line = entry_line(app.entries[match.index], match.matched_indices, match.score, i == app.selected, app.color_variant);
             if (i == app.selected) {
                 line = line | focus;
             }
@@ -374,7 +382,7 @@ std::optional<UiAction> run_ui() {
 
     // Keymaps
     auto component = CatchEvent(renderer, [&](Event event) {
-        const auto matches = filtered_matches(app);
+        const std::vector<Match> matches = filtered_matches(app);
         const Entry* selected_entry = nullptr;
         if (!matches.empty() && app.selected < matches.size()) {
             selected_entry = &app.entries[matches[app.selected].index];

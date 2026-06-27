@@ -5,16 +5,21 @@
 #include <iostream>
 
 // Main function
-int main() {
-    try {
+int main()
+{
+    try
+    {
         const auto action = allmux::run_ui();
-        if (!action) {
+        if (!action)
+        {
             return 0;
         }
 
+        int a = 0;
         const auto active_sessions = allmux::tmux_sessions();
 
-        switch (action->type) {
+        switch (action->type)
+        {
         case allmux::UiAction::Type::ssh:
             allmux::launch_ssh_session(action->name, active_sessions);
             break;
@@ -26,7 +31,9 @@ int main() {
                                         active_sessions);
             break;
         }
-    } catch (const std::exception& error) {
+    }
+    catch (const std::exception& error)
+    {
         std::cerr << "allmuxcpp: " << error.what() << '\n';
         return 1;
     }

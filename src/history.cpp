@@ -40,6 +40,7 @@ void parse_history_line(History& history, std::string_view line)
     if (tab == std::string_view::npos)
     {
         // TODO: maybe handle this more elegantly
+        // We should clean the file and start over?
         throw std::runtime_error("invalid history line");
     }
 
@@ -48,30 +49,32 @@ void parse_history_line(History& history, std::string_view line)
 
     auto values = line.substr(tab + 1);
 
-    while(!values.empty())
+    while (!values.empty())
     {
         auto comma = values.find(',');
 
-        std::string_view token =
-            (comma == std::string_view::npos) ? values : values.substr(0, comma);
+        std::string_view token = (comma == std::string_view::npos)
+                                     ? values
+                                     : values.substr(0, comma);
 
         if (!token.empty())
         {
             std::int64_t value{};
-            auto [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), value);
+            auto [ptr, ec] = std::from_chars(
+                token.data(), token.data() + token.size(), value);
 
             if (ec == std::errc{} && ptr == (token.data() + token.size()))
             {
                 timestamps.push_back(value);
             }
         }
-        
+
         if (comma == std::string_view::npos)
         {
             break;
         }
 
-        values.remove_prefix(comma+1);
+        values.remove_prefix(comma + 1);
     }
 }
 
@@ -87,13 +90,16 @@ void write_to_history_file(std::unordered_map<std::string, std::deque<std::int64
 
     std::vector<std::string> lines;
     lines.reserve(entries.size());
-    for (const auto& [key, timestamps] : entries) {
+    for (const auto& [key, timestamps] : entries)
+    {
         std::string line = key;
         line += "\t";
 
         bool first = true;
-        for (const std::int64_t timestamp : timestamps) {
-            if (!first) {
+        for (const std::int64_t timestamp : timestamps)
+        {
+            if (!first)
+            {
                 line += ',';
             }
             first = false;
@@ -170,7 +176,6 @@ int64_t History::score(std::string_view key) const {
     auto const& timestamps = it->second;
 
     if (timestamps.empty()) {
-        // TODO: notify the user?
         return 0;
     }
     auto now = unix_timestamp();

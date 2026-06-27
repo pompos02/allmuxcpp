@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <ftxui/screen/color.hpp>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -182,6 +183,25 @@ auto filtered_matches(const App& app) -> std::vector<Match> {
     return selected ? bgcolor(Color::RGB(246, 246, 246)) | bold : nothing;
 }
 
+Element highlighted_score(int score_amount) {
+    Color my_color;
+    Decorator style;
+    if (score_amount < 30)
+    {
+        my_color =Color::GrayDark;
+    }
+    else if (score_amount < 70)
+    {
+        my_color = Color::Yellow;
+    }
+    else
+    {
+        my_color = Color::Green;
+    }
+
+    return text(std::to_string(score_amount)) | color(my_color);
+}
+
 [[nodiscard]] Element highlighted_text(std::string_view value,
                                        std::span<const std::size_t> indices,
                                        std::size_t offset,
@@ -262,8 +282,8 @@ Element entry_line(const Entry& entry,
                                         selected, is_dark));
     }
 
-    line.push_back(text("  ") | style);
-    line.push_back(text(std::to_string(score)) | style);
+    line.push_back(filler() | style);
+    line.push_back(highlighted_score(score) | style);
 
     return hbox(std::move(line));
 }

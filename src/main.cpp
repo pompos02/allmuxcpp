@@ -15,7 +15,6 @@ int main()
             return 0;
         }
 
-        int a = 0;
         const auto active_sessions = allmux::tmux_sessions();
 
         switch (action->type)

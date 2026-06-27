@@ -55,7 +55,6 @@ struct App {
 
 namespace fs = std::filesystem;
 
-/// @return 'true' if dark 'false' for light (defaults to dark)
 bool is_dark_variant() {
     fs::path color_file = theme_file();
 
@@ -223,7 +222,7 @@ Element highlighted_score(int score_amount) {
                 : color(base_color);
             style = style | selected_style(selected, is_dark);
         } else {
-            style = matched ? color(Color::RGB(0, 0, 0)) | bgcolor(Color::Cyan)
+            style = matched ? color(Color::RGB(255, 255, 255)) | bgcolor(Color::Cyan)
                 : color(base_color);
             style = style | selected_style(selected, is_dark);
         }

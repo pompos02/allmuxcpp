@@ -247,18 +247,18 @@ Element entry_line(const Entry& entry,
 
     Color accent = Color::Green;
     Color detail_color = Color::GrayDark;
-    std::string icon = " ";
+    std::string icon = " MUX ";
     std::string primary;
     std::optional<std::string> detail;
 
     if (const auto* host = std::get_if<SshHost>(&entry.data)) {
         accent = Color::Cyan;
-        icon = " ";
+        icon = " SSH ";
         primary = host->alias;
         detail = host->hostname;
     } else if (const auto* container = std::get_if<DockerContainer>(&entry.data)) {
         accent = Color::Blue;
-        icon = " ";
+        icon = " DOC ";
         primary = container->name;
         detail = docker_status_label(*container);
         detail_color = container->status ? Color::Green : Color::Red;
@@ -267,8 +267,8 @@ Element entry_line(const Entry& entry,
     }
 
     const auto style = selected_style(selected, is_dark);
-    Elements line = {text(selected ? "▌ " : "  ") | color(accent) | style,
-                     text(icon) | color(accent) | bold | style,
+    Elements line = {text(icon) | color(Color::Black) | bgcolor(accent) | bold | style,
+                     text(" ") | style,
                      highlighted_text(primary, matched_indices, 0, Color::White,
                                       selected, is_dark)};
     if (is_active_tmux(entry)) {
@@ -288,9 +288,9 @@ Element entry_line(const Entry& entry,
 }
 
 [[nodiscard]] Element search_box(const App& app) {
-    Elements line = {text("Search ") | color(Color::Cyan) | bold,
+    Elements line = {text("Search ") | color(Color::Default) | bold,
                      text(app.query),
-                     text(" ") | color(Color::Black) | bgcolor(Color::Cyan)};
+                     text(" ") | color(Color::Black) | bgcolor(Color::White)};
     if (app.status) {
         line.push_back(text("  "));
         line.push_back(text(*app.status) | color(app.status_color) | bold);

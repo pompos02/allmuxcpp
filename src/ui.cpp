@@ -246,16 +246,17 @@ Element entry_line(const Entry& entry,
 {
 
     Color accent = Color::Green;
-    Color detail_color = Color::GrayDark;
     std::string icon = " MUX ";
     std::string primary;
     std::optional<std::string> detail;
 
+    Color detail_color;
     if (const auto* host = std::get_if<SshHost>(&entry.data)) {
         accent = Color::Cyan;
         icon = " SSH ";
         primary = host->alias;
         detail = host->hostname;
+        detail_color = Color::Green;
     } else if (const auto* container = std::get_if<DockerContainer>(&entry.data)) {
         accent = Color::Blue;
         icon = " DOC ";
@@ -375,10 +376,10 @@ std::optional<UiAction> run_ui() {
     auto renderer = Renderer([&] {
         const auto matches = filtered_matches(app);
         Elements visible;
-        for (std::size_t i = 0; i < matches.size(); ++i) {
-            const auto& match = matches[i];
-            auto line = entry_line(app.entries[match.index], match.matched_indices, match.score, i == app.selected, app.color_variant);
-            if (i == app.selected) {
+        for (std::size_t pos = matches.size(); pos-- > 0;) {
+            const auto& match = matches[pos];
+            auto line = entry_line(app.entries[match.index], match.matched_indices, match.score, pos == app.selected, app.color_variant);
+            if (pos == app.selected) {
                 line = line | focus;
             }
             visible.push_back(line);
@@ -394,9 +395,9 @@ std::optional<UiAction> run_ui() {
                               color(Color::GrayDark));
         }
 
-        return vbox({search_box(app), separator(),
-                     vbox(std::move(visible)) | yframe | flex}) |
-               border;
+        return vbox({vbox({ filler(), vbox(std::move(visible))})
+                | yframe | flex, separator(), search_box(app), }) | border;
+
     });
 
     // Keymaps
@@ -424,24 +425,25 @@ std::optional<UiAction> run_ui() {
             return quit();
         }
         if (event == Event::ArrowUp || event == Event::CtrlK) {
-            if (app.selected > 0) {
-                --app.selected;
-            }
-            return true;
-        }
-        if (event == Event::ArrowDown || event == Event::CtrlJ) {
-            if (app.selected + 1 < matches.size()) {
+            if (app.selected < matches.size() - 1) {
                 ++app.selected;
             }
             return true;
         }
+        if (event == Event::ArrowDown || event == Event::CtrlJ) {
+            if (app.selected > 0)
+            {
+                --app.selected;
+            }
+            return true;
+        }
         if (event == Event::PageUp) {
-            app.selected = app.selected > 5 ? app.selected - 5 : 0;
+            app.selected = std::min(app.selected + 5,
+                                    matches.empty() ? 0 : matches.size() - 1);
             return true;
         }
         if (event == Event::PageDown) {
-            app.selected = std::min(app.selected + 5,
-                                    matches.empty() ? 0 : matches.size() - 1);
+            app.selected = app.selected > 5 ? app.selected - 5 : 0;
             return true;
         }
         if (event == Event::CtrlT) {

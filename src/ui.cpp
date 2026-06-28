@@ -176,7 +176,7 @@ auto filtered_matches(const App& app) -> std::vector<Match> {
 
 [[nodiscard]] Decorator selected_style(bool selected, bool is_dark) {
     if (is_dark) {
-        return selected ? bgcolor(Color::GrayDark) | bold : nothing;
+        return selected ? bgcolor(Color::Grey30) | bold : nothing;
     }
 
     return selected ? bgcolor(Color::RGB(246, 246, 246)) | bold : nothing;
@@ -203,38 +203,72 @@ Element highlighted_score(int score_amount) {
 
 [[nodiscard]] Element highlighted_text(std::string_view value,
                                        std::span<const std::size_t> indices,
-                                       std::size_t offset,
-                                       Color base_color,
-                                       bool selected,
-                                       bool is_dark) {
+                                       std::size_t offset, Color base_color,
+                                       bool selected, bool is_dark,
+                                       EntryKind kind)
+{
     Elements parts;
-    for (std::size_t pos = 0; pos < value.size();) {
+
+    const auto last_slash = value.find_last_of('/');
+
+    const std::size_t visible_from = // index for tmux entry dimming
+        kind == EntryKind::Tmux && last_slash != std::string_view::npos
+            ? last_slash + 1
+            : 0;
+
+    for (std::size_t pos = 0; pos < value.size();)
+    {
         const bool matched = std::ranges::binary_search(indices, offset + pos);
+
+        const bool dimmed = kind == EntryKind::Tmux && pos < visible_from;
+
         auto end = pos + 1;
-        while (end < value.size() &&
-               std::ranges::binary_search(indices, offset + end) == matched) {
+
+        while (end < value.size())
+        {
+            const bool next_matched =
+                std::ranges::binary_search(indices, offset + end);
+
+            const bool next_dimmed =
+                kind == EntryKind::Tmux && end < visible_from;
+
+            if (next_matched != matched || next_dimmed != dimmed)
+            {
+                break;
+            }
+
             ++end;
         }
 
         Decorator style;
-        if (is_dark) {
-            style = matched ? color(Color::RGB(0, 0, 0)) | bgcolor(Color::Cyan)
-                : color(base_color);
-            style = style | selected_style(selected, is_dark);
-        } else {
-            style = matched ? color(Color::RGB(255, 255, 255)) | bgcolor(Color::Cyan)
-                : color(base_color);
-            style = style | selected_style(selected, is_dark);
+
+        if (matched)
+        {
+            const Color matched_fg =
+                dimmed
+                    ? Color::Black
+                    : is_dark
+                        ? Color::RGB(0, 0, 0)
+                        : Color::RGB(255, 255, 255);
+
+            style = color(matched_fg) | bgcolor(Color::Cyan);
+        }
+        else
+        {
+            style = color(base_color);
         }
 
+        style = style | selected_style(selected, is_dark);
 
-        if (matched) {
-            style = style | bold;
-        }
+        if (dimmed && !matched)
+            style = style | dim;
+
         parts.push_back(text(std::string{value.substr(pos, end - pos)}) |
                         style);
+
         pos = end;
     }
+
     return hbox(std::move(parts));
 }
 
@@ -256,7 +290,7 @@ Element entry_line(const Entry& entry,
         icon = " SSH ";
         primary = host->alias;
         detail = host->hostname;
-        detail_color = Color::Green;
+        detail_color = Color::Cyan;
     } else if (const auto* container = std::get_if<DockerContainer>(&entry.data)) {
         accent = Color::Blue;
         icon = " DOC ";
@@ -271,7 +305,7 @@ Element entry_line(const Entry& entry,
     Elements line = {text(icon) | color(Color::Black) | bgcolor(accent) | bold | style,
                      text(" ") | style,
                      highlighted_text(primary, matched_indices, 0, Color::White,
-                                      selected, is_dark)};
+                                      selected, is_dark, entry.kind())};
     if (is_active_tmux(entry)) {
         line.push_back(text("*") | color(Color::Green) | bold | style);
     }
@@ -279,7 +313,7 @@ Element entry_line(const Entry& entry,
         line.push_back(text("  ") | style);
         line.push_back(highlighted_text(*detail, matched_indices,
                                         primary.size() + 1, detail_color,
-                                        selected, is_dark));
+                                        selected, is_dark, entry.kind()));
     }
 
     line.push_back(filler() | style);

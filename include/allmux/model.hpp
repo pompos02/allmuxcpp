@@ -3,6 +3,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
@@ -40,6 +41,13 @@ struct TmuxSession
 
 using EntryData = std::variant<SshHost, DockerContainer, TmuxSession>;
 
+enum class EntryKind
+{
+    Ssh,
+    Docker,
+    Tmux,
+};
+
 struct EntryKeyVisitor
 {
     std::string_view operator()(const SshHost& s) const
@@ -65,6 +73,21 @@ struct Entry
     std::string_view get_key() const
     {
         return std::visit(EntryKeyVisitor{}, data);
+    }
+
+    EntryKind kind() const
+    {
+        return std::visit([](const auto& value) -> EntryKind {
+            using T = std::decay_t<decltype(value)>;
+
+            if constexpr (std::is_same_v<T, SshHost>)
+                return EntryKind::Ssh;
+            else if constexpr (std::is_same_v<T, DockerContainer>)
+                return EntryKind::Docker;
+            else if constexpr (std::is_same_v<T, TmuxSession>)
+                return EntryKind::Tmux;
+
+        }, data);
     }
 
 };

@@ -20,6 +20,8 @@ std::vector<std::string> tmux_sessions() {
     std::istringstream stream(result.output);
     for (std::string line; std::getline(stream, line);) {
         line = trim(line);
+        // Normalize the path
+        std::replace(line.begin(), line.end(), '.', '_');
         if (!line.empty()) {
             sessions.push_back(line);
         }
@@ -76,7 +78,7 @@ static void send_keys(const std::string& pane_target,
 
 static void goto_session(const std::string& name) {
     if ((run_status("tmux switch-client -t " + name)) != 0) {
-        throw std::runtime_error("failed to go to tmux session");
+        throw std::runtime_error("failed to go to tmux session\ntried to go to: " + name);
     }
 }
 
@@ -97,9 +99,12 @@ void launch_docker_session(const std::string& container_name,
     goto_session(container_name);
 }
 
-void launch_tmux_session(const std::string& session_name,
+void launch_tmux_session(std::string& session_name,
                          const std::optional<std::string>& path,
                          const std::vector<std::string>& active_sessions) {
+    // Normalize to don't have paratragouda
+    // TODO: might clean this logic up a bit with the normalization
+    std::replace(session_name.begin(), session_name.end(), '.', '_');
     if (!contains(active_sessions, session_name)) {
         new_session_at(session_name, path);
     }

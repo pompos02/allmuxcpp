@@ -9,7 +9,7 @@ int main()
 {
     try
     {
-        const auto action = allmux::run_ui();
+        auto action = allmux::run_ui();
         if (!action)
         {
             return 0;

@@ -68,4 +68,22 @@ std::string join_fields(const std::vector<std::string>& fields) {
     return out;
 }
 
+std::string vector_strings_to_string(const std::vector<std::string>& values)
+{
+    std::string result = "[";
+
+    for (std::size_t i = 0; i < values.size(); ++i)
+    {
+        if (i > 0)
+            result += ',';
+
+        result += '"';
+        result += values[i];
+        result += '"';
+    }
+    result += ']';
+
+    return result;
+}
+
 } // namespace allmux

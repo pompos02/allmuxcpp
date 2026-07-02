@@ -40,6 +40,7 @@ target_sources(allmuxcpp
     src/ui.cpp
     src/util.cpp
     src/history.cpp
+    src/logger.cpp
 )
 
 target_include_directories(allmuxcpp PRIVATE include)

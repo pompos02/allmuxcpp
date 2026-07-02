@@ -17,6 +17,7 @@ namespace allmux {
 [[nodiscard]] std::filesystem::path history_file();
 [[nodiscard]] std::filesystem::path cache_dir();
 [[nodiscard]] std::filesystem::path theme_file();
+[[nodiscard]] std::string vector_strings_to_string(const std::vector<std::string>& values);
 
 
 

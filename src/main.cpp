@@ -1,5 +1,7 @@
 #include "allmux/tmux.hpp"
 #include "allmux/ui.hpp"
+#include "allmux/util.hpp"
+#include "allmux/logger.hpp"
 
 #include <exception>
 #include <iostream>
@@ -16,6 +18,7 @@ int main()
         }
 
         const auto active_sessions = allmux::tmux_sessions();
+        ALLMUX_LOG("active_sessions: ", allmux::vector_strings_to_string(active_sessions));
 
         switch (action->type)
         {

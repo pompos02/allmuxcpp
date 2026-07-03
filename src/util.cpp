@@ -68,7 +68,7 @@ std::string join_fields(const std::vector<std::string>& fields) {
     return out;
 }
 
-std::string vector_strings_to_string(const std::vector<std::string>& values)
+std::string vector_strings_to_string(const std::span<std::string>& values)
 {
     std::string result = "[";
 

@@ -74,17 +74,24 @@ static std::vector<TmuxDir> tmux_dirs() {
     return dirs;
 }
 
-std::vector<TmuxSession> tmux_paths_and_sessions(std::span<std::string> const active_sesssions) {
+std::vector<TmuxSession> tmux_paths_and_sessions(std::span<std::string> const active_sessions)
+{
     const auto dirs = tmux_dirs();
     std::set<std::string> path_names;
     std::vector<TmuxSession> sessions;
 
-    for (const auto& [full_path, name] : dirs) {
+    for (const auto& [full_path, name] : dirs)
+    {
         path_names.insert(name);
-        bool is_active = is_tmux_session(name, active_sesssions);
-        sessions.push_back({.full_path = full_path,
-                            .basename = name,
-                            .is_active = is_active});
+        bool is_active = is_tmux_session(name, active_sessions);
+        sessions.emplace_back(full_path, name, is_active);
+    }
+
+    for (const auto& session : active_sessions)
+    {
+        if (!std::ranges::contains(sessions, session, &TmuxSession::basename))
+            sessions.emplace_back(std::nullopt, session, true);
+
     }
     return sessions;
 }

@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -12,11 +13,11 @@ namespace allmux
 
 struct SshHost
 {
-    std::string alias;
-    std::string hostname;
-    std::string user;
-    std::optional<std::string> description;
-    bool is_active_tmux = false;
+    std::string                 alias;
+    std::string                 hostname;
+    std::string                 user;
+    std::optional<std::string>  description;
+    bool                        is_active_tmux = false;
 };
 
 struct DockerContainer
@@ -28,8 +29,8 @@ struct DockerContainer
     std::string created_at;
     std::string status_text;
     std::string ports;
-    bool status = false;
-    bool is_active = false;
+    bool        status = false;
+    bool        is_active = false;
 };
 
 struct TmuxSession
@@ -66,6 +67,13 @@ struct EntryKeyVisitor
     }
 };
 
+struct EntryInfo
+{
+    EntryKind   kind;
+    bool        is_active; 
+};
+
+
 struct Entry
 {
     EntryData data;
@@ -90,6 +98,34 @@ struct Entry
         }, data);
     }
 
+    EntryInfo info() const
+    {
+        return std::visit( [](const auto& value) -> EntryInfo {
+            using T = std::decay_t<decltype(value)>;
+
+            if constexpr (std::is_same_v<T, SshHost>)
+            {
+                return {
+                    .kind = EntryKind::Ssh,
+                    .is_active = value.is_active_tmux,
+                };
+            }
+            else if constexpr (std::is_same_v<T, DockerContainer>)
+            {
+                return {
+                    .kind = EntryKind::Docker,
+                    .is_active = value.is_active,
+                };
+            }
+            else if constexpr (std::is_same_v<T, TmuxSession>)
+            {
+                return {
+                    .kind = EntryKind::Tmux,
+                    .is_active = value.is_active,
+                };
+            }
+        }, data);
+    }
 };
 
 struct UiAction

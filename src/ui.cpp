@@ -123,20 +123,36 @@ std::string docker_status_label(const DockerContainer& container) {
                                                            : 1;
 }
 
-[[nodiscard]] std::vector<std::string> search_fields(const Entry& entry) {
-    if (const auto* host = std::get_if<SshHost>(&entry.data)) {
-        return {host->alias, host->hostname, host->user,
-                host->description.value_or(""), "ssh"};
+[[nodiscard]] std::vector<std::string> search_fields(const Entry& entry)
+{
+    // if (const auto* host = std::get_if<SshHost>(&entry.data)) {
+    //     return {host->alias, host->hostname, host->user,
+    //             host->description.value_or(""), "ssh"};
+    // }
+    // if (const auto* container = std::get_if<DockerContainer>(&entry.data)) {
+    //     return {container->name, docker_status_label(*container),
+    //             container->status_text, container->id, container->image,
+    //             container->command, container->created_at, container->ports,
+    //             "docker", "doc"};
+    // }
+    // const auto& session = std::get<TmuxSession>(entry.data);
+    // return {tmux_display_text(session), session.basename,
+    //         session.full_path.value_or(""), "tmux", "mux"};
+
+    if (const auto* host = std::get_if<SshHost>(&entry.data))
+    {
+        return {host->alias};
     }
-    if (const auto* container = std::get_if<DockerContainer>(&entry.data)) {
-        return {container->name, docker_status_label(*container),
-                container->status_text, container->id, container->image,
-                container->command, container->created_at, container->ports,
-                "docker", "doc"};
+    if (const auto* container = std::get_if<DockerContainer>(&entry.data))
+    {
+        return {container->name};
     }
     const auto& session = std::get<TmuxSession>(entry.data);
-    return {tmux_display_text(session), session.basename,
-            session.full_path.value_or(""), "tmux", "mux"};
+    if (session.is_active)
+        return {session.basename};
+    else
+        return {tmux_display_text(session), session.basename,
+            session.full_path.value_or("")};
 }
 
 [[nodiscard]]

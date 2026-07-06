@@ -19,7 +19,7 @@ std::vector<TmuxSession> tmux_paths_and_sessions(const std::span<std::string> ac
 [[nodiscard]]
 AppData load_app_data(std::span<std::string> active_sessions);
 [[nodiscard]]
-AppData load_app_data_parallel(std::span<std::string> active_sessions, boost::asio::thread_pool& pool);
+AppData load_app_data_parallel(boost::asio::thread_pool& pool);
 
 
 } // namespace allmux

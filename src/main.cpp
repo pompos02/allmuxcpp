@@ -15,7 +15,6 @@ int main()
         }
 
         const auto active_sessions = allmux::tmux_sessions();
-
         switch (action->type)
         {
         case allmux::UiAction::Type::ssh:

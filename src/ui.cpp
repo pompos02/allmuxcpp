@@ -402,8 +402,7 @@ std::optional<UiAction> run_ui() {
 
     boost::asio::post(pool, [&] {
         try {
-            auto active_sessions = tmux_sessions();
-            auto data = load_app_data_parallel(active_sessions, pool);
+            auto data = load_app_data_parallel(pool);
 
             screen.Post([&, data = std::move(data)]() mutable {
                 app = make_app(std::move(data));

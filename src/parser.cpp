@@ -1,6 +1,7 @@
 #include "allmux/parser.hpp"
 
 #include "allmux/process.hpp"
+#include "allmux/tmux.hpp"
 #include "allmux/util.hpp"
 
 #include <algorithm>
@@ -213,18 +214,19 @@ auto submit(boost::asio::thread_pool& pool, Fn fn)
     return future;
 }
 
-AppData load_app_data_parallel(std::span<std::string> active_sesssions,
-                               boost::asio::thread_pool& pool) {
+AppData load_app_data_parallel(boost::asio::thread_pool& pool) {
+    auto active_sessions = tmux_sessions();
+
     auto f_hosts = submit(pool, [&] {
-        return ssh_hosts(home_dir() / ".ssh" / "config", active_sesssions);
+        return ssh_hosts(home_dir() / ".ssh" / "config", active_sessions);
     });
 
     auto f_containers = submit(pool, [&] {
-        return docker_containers(active_sesssions);
+        return docker_containers(active_sessions);
     });
 
     auto f_sessions = submit(pool, [&] {
-            return tmux_paths_and_sessions(active_sesssions);
+            return tmux_paths_and_sessions(active_sessions);
     });
 
     return {

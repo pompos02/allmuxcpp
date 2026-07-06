@@ -426,7 +426,7 @@ std::optional<UiAction> run_ui() {
     auto renderer = Renderer([&] {
         const auto matches = filtered_matches(app);
         Elements visible;
-        for (std::size_t pos = matches.size(); pos-- > 0;) {
+        for (std::size_t pos = 0; pos < matches.size(); ++pos) {
             const auto& match = matches[pos];
             auto line = entry_line(app.entries[match.index], match.matched_indices, match.score, pos == app.selected, app.color_variant);
             if (pos == app.selected) {
@@ -445,8 +445,9 @@ std::optional<UiAction> run_ui() {
                               color(Color::GrayDark));
         }
 
-        return vbox({vbox({ filler(), vbox(std::move(visible))})
-                | yframe | flex, separator(), search_box(app), }) | border;
+        return vbox({search_box(app), separator(),
+                     vbox(std::move(visible)) | yframe | flex}) |
+               border;
 
     });
 
@@ -475,25 +476,24 @@ std::optional<UiAction> run_ui() {
             return quit();
         }
         if (event == Event::ArrowUp || event == Event::CtrlK) {
-            if (app.selected < matches.size() - 1) {
-                ++app.selected;
-            }
-            return true;
-        }
-        if (event == Event::ArrowDown || event == Event::CtrlJ) {
-            if (app.selected > 0)
-            {
+            if (app.selected > 0) {
                 --app.selected;
             }
             return true;
         }
+        if (event == Event::ArrowDown || event == Event::CtrlJ) {
+            if (!matches.empty() && app.selected < matches.size() - 1) {
+                ++app.selected;
+            }
+            return true;
+        }
         if (event == Event::PageUp) {
-            app.selected = std::min(app.selected + 5,
-                                    matches.empty() ? 0 : matches.size() - 1);
+            app.selected = app.selected > 5 ? app.selected - 5 : 0;
             return true;
         }
         if (event == Event::PageDown) {
-            app.selected = app.selected > 5 ? app.selected - 5 : 0;
+            app.selected = std::min(app.selected + 5,
+                                    matches.empty() ? 0 : matches.size() - 1);
             return true;
         }
         if (event == Event::CtrlT) {

@@ -318,7 +318,7 @@ Element entry_line(const Entry& entry,
     }
 
     const auto style = selected_style(selected, is_dark);
-    Elements line = {text(icon) | color(Color::Black) | bgcolor(accent) | bold | style,
+    Elements line = {text(icon) | color(Color::RGB(0, 0, 0)) | bgcolor(accent) | bold | style,
                      text(" ") | style,
                      highlighted_text(primary, matched_indices, 0, Color::White,
                                       selected, is_dark, entry.kind())};

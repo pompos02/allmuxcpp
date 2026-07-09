@@ -405,7 +405,9 @@ std::optional<UiAction> run_ui() {
             auto data = load_app_data_parallel(pool);
 
             screen.Post([&, data = std::move(data)]() mutable {
+                auto query = std::move(app.query);
                 app = make_app(std::move(data));
+                app.query = query;
                 app.selected = 0;
                 app.status.reset();
             });

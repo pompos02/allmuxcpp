@@ -1,5 +1,6 @@
 #include "allmux/parser.hpp"
 
+#include "allmux/model.hpp"
 #include "allmux/process.hpp"
 #include "allmux/tmux.hpp"
 #include "allmux/util.hpp"
@@ -214,6 +215,20 @@ auto submit(boost::asio::thread_pool& pool, Fn fn)
     return future;
 }
 
+// Removes the duplicated entries that are both SSH/Docker and also show as TmuxSessions
+static void remove_duplicate_entries(AppData& data)
+{
+    std::set<std::string> names;
+    for (const auto& host : data.hosts)
+        names.insert(host.alias);
+    for (const auto& container : data.containers)
+        names.insert(container.name);
+
+    std::erase_if(data.tmux_sessions, [&](const TmuxSession& session) {
+        return names.contains(session.basename);
+    });
+}
+
 AppData load_app_data_parallel(boost::asio::thread_pool& pool) {
     auto active_sessions = tmux_sessions();
 
@@ -229,11 +244,15 @@ AppData load_app_data_parallel(boost::asio::thread_pool& pool) {
             return tmux_paths_and_sessions(active_sessions);
     });
 
-    return {
+    auto app_data = AppData{
         .hosts = f_hosts.get(),
         .containers = f_containers.get(),
         .tmux_sessions = f_sessions.get(),
     };
+
+    remove_duplicate_entries(app_data);
+    return app_data;
+
 }
 
 } // namespace allmux

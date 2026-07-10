@@ -1,6 +1,7 @@
 #include "allmux/ui.hpp"
 
 #include "allmux/fuzzy.hpp"
+#include "allmux/model.hpp"
 #include "allmux/parser.hpp"
 #include "allmux/tmux.hpp"
 #include "allmux/util.hpp"
@@ -19,11 +20,13 @@
 #include <algorithm>
 #include <cctype>
 #include <ftxui/screen/color.hpp>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 #include <exception>
 #include <filesystem>
@@ -46,12 +49,77 @@ struct App {
     std::string query;
     std::size_t selected = 0;
     std::optional<std::string> error;
-    bool loading = true;
     std::optional<std::string> status;
     Color status_color = Color::Default;
     bool color_variant = true;
     History history = allmux::History::load_history();
+
+    bool loading_hosts = true;
+    bool loading_docker = true;
+    bool loading_tmux = true;
+
+    bool loading() const 
+    {
+        return loading_hosts || loading_docker || loading_tmux;
+    }
 };
+
+bool has_non_tmux_entry(const App& app, std::string_view key)
+{
+    return std::ranges::any_of(app.entries, [&](const Entry& entry) {
+        if (std::holds_alternative<TmuxSession>(entry.data))
+            return false;
+        return entry.get_key() == key;
+    });
+}
+
+void remove_tmux_entry(App& app, std::string_view key)
+{
+    std::erase_if(app.entries, [&](const Entry& entry) {
+        const auto* session = std::get_if<TmuxSession>(&entry.data);
+        return session != nullptr && session->basename == key;
+    });
+}
+
+template <typename T>
+void merge_entries(App& app, std::vector<T> items)
+{
+    const bool was_empty = app.entries.empty();
+
+    for (auto& item : items)
+    {
+        if constexpr (std::same_as<T, SshHost>)
+        {
+            remove_tmux_entry(app, item.alias);
+        }
+        else if constexpr (std::same_as<T, DockerContainer>)
+        {
+            remove_tmux_entry(app, item.name);
+        }
+        else if constexpr (std::same_as<T, TmuxSession>)
+        {
+            if (has_non_tmux_entry(app, item.basename))
+                continue;
+        }
+
+        app.entries.push_back({.data = std::move(item)});
+    }
+
+    if (was_empty)
+        app.selected = 0;
+
+}
+
+void post_load_error(ScreenInteractive& screen, App& app, std::string label,
+                     bool App::*loading_flag, std::string message)
+{
+    screen.Post([&app, label = std::move(label), loading_flag,
+                 message = std::move(message)] {
+        app.status = label + " failed: " + message;
+        app.status_color = Color::Yellow;
+        app.*loading_flag = false;
+    });
+}
 
 namespace fs = std::filesystem;
 
@@ -375,26 +443,14 @@ void delete_previous_word(std::string& query) {
     }
 }
 
-[[nodiscard]] App make_app(AppData data) {
-    App app;
-    auto append = [&](auto& values) {
-        for (auto& value : values) {
-            app.entries.push_back({.data = std::move(value)});
-        }
-    };
-    append(data.hosts);
-    append(data.containers);
-    append(data.tmux_sessions);
-    app.color_variant = is_dark_variant();
-    app.loading = false;
-    return app;
-}
-
 
 } // namespace
 
+
+
 std::optional<UiAction> run_ui() {
     App app;
+    app.color_variant = is_dark_variant();
     auto screen = ScreenInteractive::Fullscreen();
     std::optional<UiAction> action;
 
@@ -402,25 +458,64 @@ std::optional<UiAction> run_ui() {
 
     boost::asio::post(pool, [&] {
         try {
-            auto data = load_app_data_parallel(pool);
+            auto active_sessions =
+                std::make_shared<std::vector<std::string>>(tmux_sessions());
 
-            screen.Post([&, data = std::move(data)]() mutable {
-                auto query = std::move(app.query);
-                app = make_app(std::move(data));
-                app.query = query;
-                app.selected = 0;
-                app.status.reset();
+            boost::asio::post(pool, [&, active_sessions] {
+                try {
+                    auto hosts = ssh_hosts(home_dir() / ".ssh" / "config",
+                                           *active_sessions);
+
+                    screen.Post([&, hosts = std::move(hosts)]() mutable {
+                        merge_entries(app, std::move(hosts));
+                        app.loading_hosts = false;
+                    });
+                } catch (const std::exception& error) {
+                    post_load_error(screen, app, "SSH", &App::loading_hosts,
+                                    error.what());
+                }
+                screen.PostEvent(Event::Custom);
+            });
+
+            boost::asio::post(pool, [&, active_sessions] {
+                try {
+                    auto containers = docker_containers(*active_sessions);
+                    screen.Post( [&, containers = std::move(containers)]() mutable {
+                        merge_entries(app, std::move(containers));
+                        app.loading_docker = false;
+                    });
+                } catch (const std::exception& error) {
+                    post_load_error(screen, app, "Docker",
+                                    &App::loading_docker, error.what());
+                }
+                screen.PostEvent(Event::Custom);
+            });
+
+            boost::asio::post(pool, [&, active_sessions] {
+                try {
+                    auto sessions = tmux_paths_and_sessions(*active_sessions);
+
+                    screen.Post([&, sessions = std::move(sessions)]() mutable {
+                        merge_entries(app, std::move(sessions));
+                        app.loading_tmux = false;
+                    });
+                } catch (const std::exception& error) {
+                    post_load_error(screen, app, "Tmux", &App::loading_tmux,
+                                    error.what());
+                }
+                screen.PostEvent(Event::Custom);
             });
         } catch (const std::exception& error) {
             std::string message = error.what();
-
             screen.Post([&, message = std::move(message)] {
-                app.loading = false;
+                app.loading_hosts= false;
+                app.loading_docker = false;
+                app.loading_tmux = false;
                 app.error = message;
                 app.status.reset();
             });
+            screen.PostEvent(Event::Custom);
         }
-        screen.PostEvent(Event::Custom);
     });
 
 
@@ -435,10 +530,10 @@ std::optional<UiAction> run_ui() {
             }
             visible.push_back(line);
         }
-        if (app.loading) {
+        if (app.loading()) {
             visible.push_back(text("Loading entries...") |
                               color(Color::GrayDark));
-        } else if (app.error) {
+        } else if (app.error && app.entries.empty()) {
             visible.push_back(text("failed to load entries: " + *app.error) |
                               color(Color::Red));
         } else if (visible.empty()) {
@@ -469,7 +564,7 @@ std::optional<UiAction> run_ui() {
             return quit();
         }
         if (event == Event::Return) {
-            if (app.loading || app.error || selected_entry == nullptr) {
+            if ((app.error && app.entries.empty()) || selected_entry == nullptr) {
                 return true;
             }
             app.history.record_access(selected_entry->get_key());
@@ -539,5 +634,4 @@ std::optional<UiAction> run_ui() {
     screen.Loop(component);
     return action;
 }
-
 } // namespace allmux

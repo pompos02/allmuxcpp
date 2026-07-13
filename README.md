@@ -1,5 +1,11 @@
 # allmuxcpp
 
+## Dependencies
+
+- CMake with a C++26 compiler
+- Boost headers
+- FTXUI is fetched by CMake
+
 ## Build With Docker
 
 Build the reusable build image:

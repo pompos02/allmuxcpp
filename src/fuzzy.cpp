@@ -1,8 +1,8 @@
 #include "allmux/fuzzy.hpp"
-#include "allmux/util.hpp"
+
 #include <algorithm>
 #include <cstddef>
-#include <rapidfuzz/fuzz.hpp>
+#include <string_view>
 #include <vector>
 
 
@@ -10,119 +10,130 @@ namespace allmux
 {
 namespace 
 {
-std::vector<std::string_view> split_tokens(std::string_view path)
+struct MatchRange
 {
-    std::vector<std::string_view> parts;
-    std::size_t start{0};
-    while (start < path.size())
-    {
-        while (start < path.size() && path[start] == '/') ++start;
+    std::size_t min = 0;
+    std::size_t max = 0;
+};
 
-        if (start == path.size()) break;
-
-        std::size_t end = path.find('/', start);
-        if (end == std::string::npos) end = path.size();
-
-        parts.emplace_back(path.data() + start, end - start);
-        start = end;
-    }
-
-    return parts;
-}
+[[nodiscard]] bool char_is_space(char c)
+{
+    return c == ' ' || c == '\r' || c == '\t' || c == '\f' || c == '\v' ||
+           c == '\n';
 }
 
-[[nodiscard]]
-std::span<std::size_t> matched_indices(std::string_view text,
-                                       std::string_view query,
-                                       std::span<std::size_t> out_buffer)
+[[nodiscard]] char normalized_char(char c)
 {
-    if (query.empty() || out_buffer.empty())
+    if (c == '\\') return '/';
+    if ('A' <= c && c <= 'Z') return static_cast<char>(c + ('a' - 'A'));
+    return c;
+}
+
+[[nodiscard]] bool string_matches(std::string_view a, std::string_view b)
+{
+    if (a.size() != b.size()) return false;
+
+    for (std::size_t i = 0; i < a.size(); ++i)
     {
-        return out_buffer.subspan(0, 0);
+        if (normalized_char(a[i]) != normalized_char(b[i])) return false;
     }
 
-    // Prefer an exact contiguous case-insensitive match.
-    for (std::size_t i = 0; i + query.size() <= text.size(); ++i)
+    return true;
+}
+
+[[nodiscard]] std::size_t find_needle(std::string_view haystack,
+                                      std::size_t start_pos,
+                                      std::string_view needle)
+{
+    if (needle.empty()) return std::min(start_pos, haystack.size());
+    if (needle.size() > haystack.size()) return haystack.size();
+
+    const auto last_pos = haystack.size() - needle.size();
+    if (start_pos > last_pos) return haystack.size();
+
+    for (std::size_t pos = start_pos; pos <= last_pos; ++pos)
     {
-        bool matches = true;
-        for (std::size_t j = 0; j < query.size(); ++j)
+        if (string_matches(haystack.substr(pos, needle.size()), needle))
+            return pos;
+    }
+
+    return haystack.size();
+}
+
+[[nodiscard]] std::span<std::size_t>
+write_matched_indices(std::vector<MatchRange>& ranges,
+                      std::span<std::size_t> out_buffer)
+{
+    std::ranges::sort(ranges, {}, &MatchRange::min);
+
+    std::size_t count = 0;
+    for (const MatchRange& range : ranges)
+    {
+        for (std::size_t pos = range.min; pos < range.max; ++pos)
         {
-            if (text[i + j] != query[j])
-            {
-                matches = false;
-                break;
-            }
-        }
-
-        if (matches)
-        {
-            const auto count = std::min(query.size(), out_buffer.size());
-            for (std::size_t j = 0; j < count; ++j)
-            {
-                out_buffer[j] = i + j;
-            }
-            return out_buffer.subspan(0, count);
+            if (count == out_buffer.size()) return out_buffer.subspan(0, count);
+            out_buffer[count++] = pos;
         }
     }
 
-    // Otherwise highlight the first ordered subsequence match.
-    std::size_t write_idx = 0;
-    std::size_t query_idx = 0;
-
-    for (std::size_t i = 0; i < text.size() && query_idx < query.size(); ++i)
-    {
-        if (text[i] == query[query_idx])
-        {
-            if (write_idx >= out_buffer.size())
-            {
-                break;
-            }
-
-            out_buffer[write_idx++] = i;
-            ++query_idx;
-        }
-    }
-
-    // Only return subsequence highlights if the whole query was found.
-    if (query_idx != query.size())
-    {
-        return out_buffer.subspan(0, 0);
-    }
-
-    return out_buffer.subspan(0, write_idx);
+    return out_buffer.subspan(0, count);
+}
 }
 
 [[nodiscard]] FuzzyMatch fuzzy_match(const std::string& text,
-                                     const std::string& query,
-                                     std::span<std::size_t> out_buffer)
-                                     
+                                      const std::string& query,
+                                      std::span<std::size_t> out_buffer)
 {
     if (query.empty())
         return {.matched_indices = {}, .matched = true, .score = 0};
 
-    const auto lower_text = str_tolower(text);
-    const auto lower_query = str_tolower(query);
+    std::vector<MatchRange> ranges;
+    std::size_t needle_part_count = 0;
+    std::size_t total_dim = 0;
 
-    auto indices = matched_indices(lower_text, lower_query, out_buffer);
-    if (indices.empty()) return {};
-
-    int score = rapidfuzz::fuzz::partial_ratio(lower_query, lower_text);
-    if (score < 60) return {};
-
-    if (lower_text.contains(lower_query)) score += 20;
-    if (lower_text.starts_with(lower_query)) score += 20;
-
-    for (auto token : split_tokens(lower_text))
+    for (std::size_t part_pos = 0; part_pos < query.size();)
     {
-        if (token.starts_with(lower_query))
+        while (part_pos < query.size() && char_is_space(query[part_pos]))
+            ++part_pos;
+        if (part_pos == query.size()) break;
+
+        std::size_t part_end = part_pos;
+        while (part_end < query.size() && !char_is_space(query[part_end]))
+            ++part_end;
+
+        const std::string_view part{query.data() + part_pos,
+                                    part_end - part_pos};
+        ++needle_part_count;
+
+        std::size_t find_pos = 0;
+        while (find_pos < text.size())
         {
-            score += 15;
-            break;
+            find_pos = find_needle(text, find_pos, part);
+            const auto range = std::ranges::find_if(ranges, [&](const MatchRange& r) {
+                return r.min <= find_pos && find_pos < r.max;
+            });
+            if (range == ranges.end()) break;
+            find_pos = range->max;
         }
+
+        if (find_pos < text.size())
+        {
+            ranges.push_back({.min = find_pos, .max = find_pos + part.size()});
+            total_dim += part.size();
+        }
+
+        part_pos = part_end;
     }
 
+    if (ranges.size() != needle_part_count)
+        return {};
+
+    const int score = text.empty()
+                          ? 0
+                          : static_cast<int>((total_dim * 100) / text.size());
+
     return {
-        .matched_indices = indices,
+        .matched_indices = write_matched_indices(ranges, out_buffer),
         .matched = true,
         .score = score,
     };

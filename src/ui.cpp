@@ -236,7 +236,7 @@ auto filtered_matches(const App& app) -> std::vector<Match> {
         auto base_score = match.score;
         auto history_score = app.history.score(app.entries[i].get_key());
         matches.push_back({.index = i,
-                           .score = static_cast<int>(base_score + ((double)base_score * history_score / 100)),
+                           .score = static_cast<int>(base_score + ((double)base_score * history_score / 60)),
                            .matched_indices = {match.matched_indices.begin(),
                                                match.matched_indices.end()}});
     }
